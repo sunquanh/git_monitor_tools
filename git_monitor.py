@@ -3178,7 +3178,7 @@ class GitMonitorApp:
         header.create_text(tx, sub_y, text="实时状态 · 上线前差异比对 · 离线可用", anchor="w",
                            fill=THEME_HEADER_SUB, font=(FONT_UI, 9))
         # 版本徽章
-        v3 = header.create_text(3800, title_y, text="v3.0", anchor="e",
+        v3 = header.create_text(3800, title_y, text="v3.2.3", anchor="e",
                                 fill="white", font=(FONT_UI, 9, "bold"))
         header.bind("<Configure>", lambda e, tag=v3: header.coords(tag, e.width - 20, title_y))
 
@@ -4868,8 +4868,17 @@ class GitMonitorApp:
     def _background_poll(self):
         while self.polling:
             time.sleep(REFRESH_INTERVAL)
-            if self.auto_var.get():
-                self.refresh()
+            try:
+                # refresh() 会直接操作 tkinter 控件（状态点/进度条），必须在主线程执行；
+                # 此前是后台线程直调 self.refresh()，有随机闪退风险
+                self.root.after(0, self._poll_tick)
+            except Exception:
+                break  # 窗口已销毁
+
+    def _poll_tick(self):
+        """主线程：自动刷新节拍（auto 开关与 refresh 都在 UI 线程求值）。"""
+        if self.polling and self.auto_var.get():
+            self.refresh()
 
     # -------------------- 批量操作（多仓库 fetch / pull） --------------------
     def _open_batch_op(self):
