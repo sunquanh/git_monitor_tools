@@ -1016,10 +1016,11 @@ def api_commit(name):
     data = request.json
     message = data.get('message', '')
     auto_stage = data.get('auto_stage', False)  # 自动暂存全部变更
+    amend = data.get('amend', False)  # 修正上一次提交（git commit --amend）  # 自动暂存全部变更
     if auto_stage:
-        out, rc = gm.ws_stage_all_and_commit(path, message)
+        out, rc = gm.ws_stage_all_and_commit(path, message, amend=amend)
     else:
-        out, rc = gm.ws_commit(path, message)
+        out, rc = gm.ws_commit(path, message, amend=amend)
     return jsonify({'ok': rc == 0, 'output': out})
 
 @app.route('/api/workspace/<name>/discard', methods=['POST'])

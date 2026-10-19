@@ -1,1 +1,28 @@
-{"auto_refresh":true,"commit_templates":["feat: "],"compare":{"auto_fetch":true,"dev_branch":"develop","direction":"dev_to_prod","enabled":true,"prod_branch":"main","repo":"示例项目"},"groups":{"默认":["示例项目"]},"minimize_to_tray":true,"presets":[],"refresh_interval":30,"repos":{"示例项目":"D:\\code\\my-project"},"sound":true,"theme":"dark","tray":true}
+{
+  "auto_refresh": true,
+  "commit_templates": [
+    "feat: "
+  ],
+  "compare": {
+    "auto_fetch": true,
+    "dev_branch": "develop",
+    "direction": "dev_to_prod",
+    "enabled": true,
+    "prod_branch": "main",
+    "repo": "示例项目"
+  },
+  "groups": {
+    "默认": [
+      "示例项目"
+    ]
+  },
+  "minimize_to_tray": true,
+  "presets": [],
+  "refresh_interval": 30,
+  "repos": {
+    "示例项目": "D:\\code\\my-project"
+  },
+  "sound": true,
+  "theme": "dark",
+  "tray": true
+}

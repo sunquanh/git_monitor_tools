@@ -203,6 +203,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);height:100vh
 .commit-row{display:flex;gap:8px;align-items:center}
 .commit-row select{width:100px;height:32px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:13px}
 .commit-row input{flex:1;height:32px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:13px}
+#wsScope{flex:none}
+.amend-check{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);cursor:pointer;white-space:nowrap;flex-shrink:0;user-select:none}
+.amend-check input{accent-color:var(--blue);cursor:pointer;width:14px;height:14px;flex:none}
+.amend-check:has(input:checked){color:var(--blue2);font-weight:600}
 /* 提交拆分按钮：主按钮「提交」+「▾」提交后推送；相连拼成一个整体 */
 .commit-split{display:inline-flex}
 .commit-split .split-main{border-radius:var(--radius-sm) 0 0 var(--radius-sm);border-right:none}
@@ -551,20 +555,28 @@ a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,te
     </div>
     <div class="commit-box">
       <div class="commit-row" style="flex-wrap:wrap;gap:6px">
-        <select id="wsPrefix">
+        <select id="wsPrefix" title="Conventional Commits 类型前缀">
           <option value="">无前缀</option>
           <option value="feat:">feat:</option>
           <option value="fix:">fix:</option>
           <option value="refactor:">refactor:</option>
           <option value="docs:">docs:</option>
+          <option value="style:">style:</option>
+          <option value="perf:">perf:</option>
+          <option value="test:">test:</option>
+          <option value="build:">build:</option>
+          <option value="ci:">ci:</option>
           <option value="chore:">chore:</option>
+          <option value="revert:">revert:</option>
         </select>
+        <input type="text" id="wsScope" placeholder="scope" title="Conventional Commits 的 scope（可选），如 feat(api): 更新接口；只对上面的标准类型生效，模板类前缀不受影响" style="width:76px;flex-shrink:0">
         <input type="text" id="wsMsg" placeholder="提交信息 (Enter 提交 · Ctrl+Enter 提交并推送)" onkeydown="if(event.key==='Enter')doCommit();else if(event.ctrlKey&&event.key==='Enter')commitThenPush()">
         <button class="btn btn-icon" onclick="suggestCommitMsg()" title="生成提交信息建议（本地 Ollama，数据不出本机）">✨</button>
         <div class="commit-split" style="white-space:nowrap;flex-shrink:0">
-          <button class="btn btn-primary split-main" onclick="doCommit()" title="提交当前暂存区内容（尊重勾选与块/行级暂存）">📝 提交</button>
+          <button class="btn btn-primary split-main" id="commitMainBtn" onclick="doCommit()" title="提交当前暂存区内容（尊重勾选与块/行级暂存）">📝 提交</button>
           <button class="btn btn-primary split-caret" onclick="toggleCommitMenu(event)" title="提交后自动推送（提交+推送）" aria-haspopup="true" aria-expanded="false">▾</button>
         </div>
+        <label class="amend-check" title="修正上一次提交：把暂存区内容并入 HEAD，不产生新提交（git commit --amend）&#10;注意：已推送的提交 amend 后需要 force push 才能同步到远程"><input type="checkbox" id="wsAmend" onchange="onAmendToggle()"> Amend</label>
         <button class="btn" onclick="doPush()" style="white-space:nowrap;flex-shrink:0" title="把本地提交推送到远程（不动暂存区）">⬆ 推送</button>
         <button class="btn btn-icon" id="commitMoreBtn" onclick="toggleCommitMore(event)" title="更多提交操作（拆分提交 / 存为草稿组）" aria-haspopup="true" aria-expanded="false">⋯</button>
       </div>
@@ -2940,26 +2952,38 @@ async function preflightCommitChecks() {
      旧「提交+推送」走后端 /commit-and-push 会强制 git add -A，
      覆盖用户的勾选/块级暂存——现改为同一提交链路，暂存语义与主按钮一致） */
 function _fullCommitMsg() {
-  const prefix = $('wsPrefix').value;
+  let prefix = $('wsPrefix').value;
+  const scope = $('wsScope').value.trim().replace(/[()]/g, '');
+  // scope 只对标准 type: 生效（feat: → feat(api):），模板类前缀原样保留
+  if (scope && /^[a-z]+:$/.test(prefix)) prefix = prefix.slice(0, -1) + '(' + scope + '):';
   const msg = $('wsMsg').value.trim();
   return prefix ? (msg.startsWith(prefix) ? msg : prefix + ' ' + msg) : msg;
+}
+/* Amend 开关：切换提交按钮文案，让"修正模式"一眼可见，避免误操作 */
+function onAmendToggle() {
+  const on = $('wsAmend').checked;
+  const btn = $('commitMainBtn');
+  btn.innerHTML = on ? '📝 Amend' : '📝 提交';
+  btn.title = on ? '修正上一次提交（git commit --amend）：暂存区内容并入 HEAD，不产生新提交' : '提交当前暂存区内容（尊重勾选与块/行级暂存）';
 }
 async function commitCore(pushAfter) {
   const name = $('wsRepoSelect').value;
   const msg = $('wsMsg').value.trim();
+  const amend = $('wsAmend').checked;
   if (!msg) return toast('请输入提交信息', 'error');
   if (_wsBusy) return toast('上一次提交还在进行中…', 'info');
   const stagedCount = (wsFiles || []).filter(f => f.staged).length;
   // 提交的是「已暂存」的内容：尊重勾选/hunk 级暂存。暂存区为空时明确提示，
   // 而不是默默把所有变更（含用户特意没暂存的）全提交。
-  if (!stagedCount && !await askConfirm(`暂存区是空的。\n\n确定要「暂存全部变更并提交」吗？${pushAfter ? '\n提交成功后将继续推送到远程。' : ''}\n（取消后可手动勾选文件 / 只暂存某些变更块）`)) return;
+  if (!stagedCount && !await askConfirm(`暂存区是空的。\n\n确定要「暂存全部变更并${amend ? '修正上一次提交' : '提交'}」吗？${pushAfter ? '\n提交成功后将继续推送到远程。' : ''}\n（取消后可手动勾选文件 / 只暂存某些变更块）`)) return;
   if (!await preflightCommitChecks()) return toast('已取消提交', 'info');
   _wsBusy = true;
   try {
-    const r = await api(`/api/workspace/${name}/commit`, {method:'POST', body:{message: _fullCommitMsg(), auto_stage: !stagedCount}});
-    if (!(r && r.ok)) return toast('提交失败: ' + (r?.output || r?.error || ''), 'error');
+    const r = await api(`/api/workspace/${name}/commit`, {method:'POST', body:{message: _fullCommitMsg(), auto_stage: !stagedCount, amend}});
+    if (!(r && r.ok)) return toast((amend ? 'Amend 失败: ' : '提交失败: ') + (r?.output || r?.error || ''), 'error');
     $('wsMsg').value = '';
-    toast('提交成功 ✅');
+    if (amend) { $('wsAmend').checked = false; onAmendToggle(); }  // 成功后复位，避免下次误 amend
+    toast(amend ? '已修正上一次提交 ✅' : '提交成功 ✅');
     loadWorkspace(); fetchRepos();
     // 提交与推送分开执行、分开报告：推送被拒时走 pushRepo 的一键恢复流程，
     // 本地已提交的事实不再被「提交失败」的笼统提示掩盖

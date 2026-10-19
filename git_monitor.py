@@ -2207,18 +2207,20 @@ def build_discard_confirm_text(files, limit=8):
     return title, body
 
 
-def ws_commit(repo_path, message):
-    """提交已暂存内容"""
+def ws_commit(repo_path, message, amend=False):
+    """提交已暂存内容；amend=True 时修正上一次提交（git commit --amend，不产生新提交）。"""
+    if amend:
+        return git(repo_path, "commit", "--amend", "-m", message)
     return git(repo_path, "commit", "-m", message)
 
 
-def ws_stage_all_and_commit(repo_path, message):
+def ws_stage_all_and_commit(repo_path, message, amend=False):
     """一键暂存全部变更并提交：git add -A → git commit -m。
     未跟踪文件一并纳入（全部=工作区所有变更）。返回 (out, rc)。"""
     out, rc = git(repo_path, "add", "-A")
     if rc != 0:
         return out, rc
-    return ws_commit(repo_path, message)
+    return ws_commit(repo_path, message, amend=amend)
 
 
 # ---------- 提交信息模板 / 历史记忆 ----------
