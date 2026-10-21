@@ -1082,6 +1082,16 @@ def api_unstage(name):
     out, rc = gm.ws_unstage(path, files)
     return jsonify({'ok': rc == 0, 'output': out})
 
+@app.route('/api/workspace/<name>/open-terminal', methods=['POST'])
+def api_open_terminal(name):
+    """在当前仓库目录打开系统终端：路径取自服务端配置 REPOS，不接受客户端传入的路径参数（防注入）"""
+    path = REPOS.get(name)
+    if not path:
+        return jsonify({'error': '仓库不存在'}), 404
+    ok, msg = gm.open_terminal_at(path)
+    return jsonify({'ok': ok, 'output': msg})
+
+
 @app.route('/api/workspace/<name>/commit', methods=['POST'])
 def api_commit(name):
     """提交已暂存内容"""

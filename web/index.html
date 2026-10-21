@@ -546,6 +546,7 @@ a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,te
       <select id="wsRepoSelect" onchange="loadWorkspace()"></select>
       <button class="btn btn-sm" onclick="loadWorkspace()">🔄 刷新</button>
       <button class="btn btn-sm" onclick="fetchRepo()" title="从远程抓取最新引用（不改工作区）">⤓ 抓取</button>
+      <button class="btn btn-sm" onclick="openTerminal()" title="在当前仓库目录打开系统终端（Windows/macOS/Linux 自动适配）">💻 终端</button>
       <button class="btn btn-sm" onclick="stageAll()" title="把工作区所有变更加入暂存区（等同 git add -A）">＋ 全部暂存</button>
       <button class="btn btn-sm" onclick="showBlame()">🔍 Blame</button>
       <button class="btn btn-sm" onclick="showFileHistory()">📜 文件历史</button>
@@ -2970,6 +2971,14 @@ async function fetchRepo() {
   const r = await api(`/api/repo/${name}/fetch`, { method: 'POST' });
   if (r && r.ok) { toast('已抓取远程更新'); loadWorkspace(); fetchRepos(); }
   else toast('抓取失败: ' + ((r && (r.output || r.error)) || ''), 'error');
+}
+/* 💻 在当前仓库目录打开系统终端：后端用服务端配置的路径启动，前端不传路径 */
+async function openTerminal() {
+  const name = $('wsRepoSelect').value;
+  if (!name) return toast('请先选择仓库', 'error');
+  const r = await api(`/api/workspace/${name}/open-terminal`, { method: 'POST' });
+  if (r && r.ok) toast('已在仓库目录打开终端 💻');
+  else toast('打开终端失败: ' + ((r && (r.output || r.error)) || ''), 'error');
 }
 async function stageAll() {
   const name = $('wsRepoSelect').value;

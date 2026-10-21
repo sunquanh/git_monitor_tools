@@ -2403,6 +2403,45 @@ def ws_stage_all_and_commit(repo_path, message, amend=False):
     return ws_commit(repo_path, message, amend=amend)
 
 
+def terminal_launch_cmd(repo_path, platform=None):
+    """构建「在仓库目录打开系统终端」的启动命令（纯函数，便于测试）。
+    路径只来自服务端配置（REPOS），不拼接用户输入。返回 (argv, popen_kwargs)。"""
+    plat = platform or sys.platform
+    if plat.startswith("win"):
+        # start 是 cmd 内建命令；/k 让窗口在 cd 后保持打开
+        return (["cmd", "/c", f'start "" cmd /k cd /d "{repo_path}"'],
+                {"creationflags": getattr(subprocess, "CREATE_NEW_CONSOLE", 0)})
+    if plat == "darwin":
+        return (["open", "-a", "Terminal", repo_path], {})
+    # Linux：按优先级找可用的终端模拟器
+    for prog, argv in (
+        ("gnome-terminal", ["gnome-terminal", "--working-directory", repo_path]),
+        ("konsole", ["konsole", "--workdir", repo_path]),
+        ("xfce4-terminal", ["xfce4-terminal", "--working-directory", repo_path]),
+        ("x-terminal-emulator", ["x-terminal-emulator", "-e", "bash", "-c",
+                                 f'cd "{repo_path}" && exec bash']),
+        ("xterm", ["xterm", "-e", "bash", "-c", f'cd "{repo_path}" && exec bash']),
+    ):
+        if shutil.which(prog):
+            return (argv, {"start_new_session": True})
+    return (None, {})
+
+
+def open_terminal_at(repo_path):
+    """在仓库目录打开系统终端（不阻塞调用方）。返回 (ok, msg)。"""
+    if not os.path.isdir(repo_path):
+        return False, f"目录不存在: {repo_path}"
+    argv, kwargs = terminal_launch_cmd(repo_path)
+    if not argv:
+        return False, "未找到可用的终端程序（gnome-terminal/konsole/xfce4-terminal/xterm）"
+    try:
+        subprocess.Popen(argv, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
+        return True, "已打开终端"
+    except Exception as e:
+        return False, f"打开终端失败: {e}"
+
+
 # ---------- 提交信息模板 / 历史记忆 ----------
 COMMIT_PREFIXES = ["", "feat:", "fix:", "docs:", "refactor:",
                    "chore:", "test:", "perf:", "style:"]
