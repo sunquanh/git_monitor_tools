@@ -1,28 +1,41 @@
 {
+  "refresh_interval": 30,
+  "theme": "dark",
   "auto_refresh": true,
-  "commit_templates": [
-    "feat: "
-  ],
-  "compare": {
-    "auto_fetch": true,
-    "dev_branch": "develop",
-    "direction": "dev_to_prod",
-    "enabled": true,
-    "prod_branch": "main",
-    "repo": "示例项目"
+  "sound": true,
+  "tray": true,
+  "minimize_to_tray": true,
+  "repos": {
+    "aiops-backend": "C:\\workspace\\git-workspace\\yl\\yl-backend\\aiops-backend",
+    "aiops-data-service": "C:\\workspace\\git-workspace\\yl\\yl-data\\aiops-data-service",
+    "my-git-tool": "C:\\workspace\\AllProject\\gamegus\\测试工具\\git_门禁工具_5.0\\gampuss_hgtool",
+    "aiops-frontend": "C:\\workspace\\git-workspace\\yl\\yl-front\\aiops-frontend"
   },
   "groups": {
     "默认": [
-      "示例项目"
+      "aiops-backend",
+      "aiops-data-service",
+      "aiops-frontend"
     ]
   },
-  "minimize_to_tray": true,
-  "presets": [],
-  "refresh_interval": 30,
-  "repos": {
-    "示例项目": "D:\\code\\my-project"
+  "compare": {
+    "enabled": true,
+    "repo": "aiops-backend",
+    "dev_branch": "develop",
+    "prod_branch": "main",
+    "direction": "dev_to_prod",
+    "auto_fetch": true
   },
-  "sound": true,
-  "theme": "dark",
-  "tray": true
+  "presets": [],
+  "draft_groups": {
+    "aiops-backend": [
+      {
+        "name": "修复",
+        "files": [
+          "config/application-dev.yml"
+        ]
+      }
+    ]
+  },
+  "net_timeout": 120
 }
