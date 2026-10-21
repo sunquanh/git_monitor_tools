@@ -40,6 +40,12 @@ echo.
 
 :: ---- Start server (port conflict / zombie detection is inside git_web.py) ----
 python -u git_web.py
+set SERVER_RC=%errorlevel%
+
+:: ---- Normal exit (exit code 0: Ctrl+C, or auto-exit after the web
+:: page was closed): close this window right away, nothing to clean ----
+if "%SERVER_RC%"=="0" exit /b 0
+
 
 :: ---- Cleanup after exit: same verified-only kill, in case the server was
 :: interrupted mid-run and left a python holding the port ----

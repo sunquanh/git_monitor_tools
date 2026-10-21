@@ -724,6 +724,62 @@ def restart_repo_watchers():
         start_repo_watchers()
 
 
+
+# ============================================================
+# 关页自动退出：以 /api/events 的 SSE 连接数作"页面还开着"的信号。
+# 最后一个页面关闭（连接断开）后宽限 exit_grace_seconds 秒，期间有新页面
+# 连入（刷新/重开）就取消；到期仍无人连接则 cleanup() 后退出进程。
+# 只在至少连过一个页面后才武装，避免服务刚启动、浏览器还没打开就自杀。
+# ============================================================
+_exit_timer = None
+_exit_lock = threading.Lock()
+_sse_ever_connected = False
+
+
+def _exit_grace_seconds():
+    try:
+        return max(3, min(int(CFG.get('exit_grace_seconds', 10)), 300))
+    except Exception:
+        return 10
+
+
+def _note_sse_connected():
+    global _sse_ever_connected, _exit_timer
+    with _exit_lock:
+        _sse_ever_connected = True
+        if _exit_timer is not None:
+            _exit_timer.cancel()
+            _exit_timer = None
+
+
+def _note_sse_disconnected():
+    global _exit_timer
+    if not CFG.get('exit_on_page_close', True):
+        return
+    with _exit_lock:
+        if not _sse_ever_connected:
+            return
+        if _exit_timer is not None:
+            _exit_timer.cancel()
+        t = threading.Timer(_exit_grace_seconds(), _exit_if_no_clients)
+        t.daemon = True
+        _exit_timer = t
+        t.start()
+
+
+def _exit_if_no_clients():
+    if not CFG.get('exit_on_page_close', True):
+        return
+    with _sse_lock:
+        if len(SSE_CLIENTS) > 0:
+            return
+    print('[auto-exit] 监控页面已全部关闭，服务退出', flush=True)
+    try:
+        cleanup()
+    except Exception:
+        pass
+    os._exit(0)
+
 @app.route('/api/events')
 def api_events():
     """SSE：实时推送仓库状态变化；15s 心跳保活。限制客户端数，避免长连接占满线程池。"""
@@ -738,6 +794,7 @@ def api_events():
                 except Exception:
                     pass
             SSE_CLIENTS.append(q)
+        _note_sse_connected()
         try:
             yield 'retry: 3000\n\n'
             while True:
@@ -754,6 +811,7 @@ def api_events():
                     SSE_CLIENTS.remove(q)
                 except Exception:
                     pass
+            _note_sse_disconnected()
     return Response(gen(), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
@@ -2024,6 +2082,7 @@ def api_config():
     return jsonify({
         'refresh_interval': CFG.get('refresh_interval', 30),
         'net_timeout': CFG.get('net_timeout', 120),
+        'exit_on_page_close': CFG.get('exit_on_page_close', True),
         'theme': CFG.get('theme', 'light'),
         'groups': CFG.get('groups', {}),
         'commit_templates': CFG.get('commit_templates', []),
@@ -2044,6 +2103,10 @@ def api_update_config():
     if 'net_timeout' in data:
         # 网络命令超时（fetch/pull/push）：10~1800s，防止误填成 0 或超大值
         CFG['net_timeout'] = max(10, min(int(data['net_timeout']), 1800))
+    if 'exit_on_page_close' in data:
+        CFG['exit_on_page_close'] = bool(data['exit_on_page_close'])
+    if 'exit_grace_seconds' in data:
+        CFG['exit_grace_seconds'] = max(3, min(int(data['exit_grace_seconds']), 300))
     if 'theme' in data:
         CFG['theme'] = data['theme']
     if 'repos' in data and isinstance(data['repos'], dict):

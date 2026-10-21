@@ -167,6 +167,10 @@ DEFAULT_CONFIG = {
     # 网络命令（fetch/pull/push）超时秒数：大仓库首次抓取或 VPN 抖动时
     # 15s/30s 必然假失败，默认放宽到 120s，可在配置里按需调整（10~1800）
     "net_timeout": 120,
+    # 关页自动退出：最后一个监控页面关闭（SSE 断开）且宽限期满后，服务自行
+    # 退出（配合启动脚本关窗）。exit_grace_seconds 防刷新/重开页面被误杀。
+    "exit_on_page_close": True,
+    "exit_grace_seconds": 10,
     "theme": "light",
     "auto_refresh": True,
     "sound": True,
@@ -221,6 +225,11 @@ def load_config():
                 cfg["net_timeout"] = max(10, min(int(cfg.get("net_timeout", 120)), 1800))
             except Exception:
                 cfg["net_timeout"] = 120
+            try:
+                cfg["exit_grace_seconds"] = max(3, min(int(cfg.get("exit_grace_seconds", 10)), 300))
+            except Exception:
+                cfg["exit_grace_seconds"] = 10
+            cfg["exit_on_page_close"] = bool(cfg.get("exit_on_page_close", True))
             cfg.setdefault("repos", {})
             cfg.setdefault("compare", DEFAULT_CONFIG["compare"])
             cfg.setdefault("presets", [])
