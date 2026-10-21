@@ -2408,8 +2408,11 @@ def terminal_launch_cmd(repo_path, platform=None):
     路径只来自服务端配置（REPOS），不拼接用户输入。返回 (argv, popen_kwargs)。"""
     plat = platform or sys.platform
     if plat.startswith("win"):
-        # start 是 cmd 内建命令；/k 让窗口在 cd 后保持打开
-        return (["cmd", "/c", f'start "" cmd /k cd /d "{repo_path}"'],
+        # ⚠ 不要写成 cmd /c start "整串"：argv 里的整串会被 subprocess.list2cmdline
+        # 再包一层引号并把内嵌引号转义，cmd 二次解析后 "" 会变成 \\，实测弹窗
+        # 「Windows 找不到 '\\' 文件」。CREATE_NEW_CONSOLE 已保证新开窗口，无需 start；
+        # 路径作独立 argv 元素、由 subprocess 按需加引号，/k 让窗口在 cd 后保持打开。
+        return (["cmd", "/k", "cd", "/d", repo_path],
                 {"creationflags": getattr(subprocess, "CREATE_NEW_CONSOLE", 0)})
     if plat == "darwin":
         return (["open", "-a", "Terminal", repo_path], {})
