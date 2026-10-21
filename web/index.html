@@ -68,7 +68,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);height:100vh
 .btn:focus-visible{outline:2px solid var(--blue2);outline-offset:2px}
 
 /* Tabs */
-.tabs{display:flex;gap:0;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;overflow-y:hidden}
+.tabs{display:flex;gap:0;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
+.tabs::-webkit-scrollbar{height:3px}
+.tabs::-webkit-scrollbar-thumb{background:var(--border-light);border-radius:2px}
 .tab{height:42px;padding:0 18px;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap}
 .tab:hover{color:var(--text);background:var(--hover)}
 .tab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
@@ -81,8 +83,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);height:100vh
 
 /* Cards */
 .cards-section{padding:16px 20px 8px;flex-shrink:0}
-.chips{display:flex;gap:6px;margin-bottom:12px}
-.chip{height:28px;padding:0 12px;border-radius:14px;font-size:12px;font-weight:500;display:flex;align-items:center;gap:5px;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text2);transition:all .15s}
+/* 窄屏时 chips 不换行、横向滚动，避免「全\n部 2」这种被挤断的文字 */
+.chips{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;padding-bottom:1px}
+.chips::-webkit-scrollbar{display:none}
+.chip{height:28px;padding:0 12px;border-radius:14px;font-size:12px;font-weight:500;display:flex;align-items:center;gap:5px;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text2);transition:all .15s;white-space:nowrap;flex-shrink:0}
 .chip:hover{border-color:var(--blue);color:var(--blue)}
 .chip.active{background:var(--blue-soft);border-color:var(--blue);color:var(--blue);font-weight:600}
 .chip-count{background:var(--hover);padding:0 6px;border-radius:8px;font-size:10px;font-weight:700}
@@ -140,14 +144,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);height:100vh
 .commit-msg{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .commit-meta{font-size:11px;color:var(--text3);margin-top:3px;display:flex;gap:12px}
 .commit-hash{font-family:var(--mono);color:var(--blue);font-weight:600}
-.file-tag{height:18px;padding:0 6px;border-radius:4px;font-size:10px;font-weight:600;display:inline-block;margin-right:4px}
+.file-tag{height:18px;padding:0 6px;border-radius:4px;font-size:10px;font-weight:600;display:inline-block;margin-right:4px;flex-shrink:0;line-height:18px}
 .file-tag.A{background:rgba(16,185,129,0.12);color:var(--green2)}
 .file-tag.M{background:rgba(245,158,11,0.12);color:var(--yellow2)}
 .file-tag.D{background:rgba(239,68,68,0.12);color:var(--red2)}
 
 /* Diff View */
 .diff-view{flex:1;overflow:auto;padding:12px 16px;font-family:var(--mono);font-size:12px;line-height:1.6}
-.diff-line{padding:1px 8px;border-radius:3px;white-space:pre-wrap;word-break:break-all}
+/* 行号两列（旧/新）固定宽度、不可选中，避免复制代码时把行号带进去 */
+.diff-line{padding:1px 8px;border-radius:3px;display:flex;gap:8px;align-items:flex-start}
+.diff-line .ln{flex:0 0 auto;width:40px;text-align:right;color:var(--text3);opacity:.55;user-select:none;white-space:nowrap}
+.diff-line .lc{flex:1;min-width:0;white-space:pre-wrap;word-break:break-all}
 .diff-line.add{background:rgba(16,185,129,0.08);color:var(--green2)}
 .diff-line.del{background:rgba(239,68,68,0.08);color:var(--red2)}
 .diff-line.hunk{background:rgba(139,92,246,0.08);color:var(--purple);font-weight:600}
@@ -247,7 +254,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);height:100vh
 .skel-card{border:1px solid var(--border);border-radius:var(--radius);padding:16px;height:150px;position:relative;overflow:hidden;background:var(--surface)}
 .skel-card::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(127,140,150,.18),transparent);animation:shimmer 1.4s infinite}
 @keyframes shimmer{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
-.toast-box{position:fixed;top:20px;right:20px;z-index:10000;display:flex;flex-direction:column;gap:8px;align-items:flex-end;pointer-events:none}
+.toast-box{position:fixed;top:76px;right:20px;z-index:10000;display:flex;flex-direction:column;gap:8px;align-items:flex-end;pointer-events:none}
 .toast{position:relative;padding:12px 20px;border-radius:var(--radius);font-size:13px;color:white;animation:slideIn .3s ease;box-shadow:0 4px 12px rgba(0,0,0,.3);max-width:420px}
 .toast.success{background:var(--green)}
 .toast.error{background:var(--red)}
@@ -340,6 +347,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);height:100vh
 .hm-cell[data-l="2"]{background:#40c463;border-color:transparent}
 .hm-cell[data-l="3"]{background:#2da042;border-color:transparent}
 .hm-cell[data-l="4"]{background:#1a6b30;border-color:transparent}
+/* 热力图铺满容器：列宽均分，格子随列宽自适应（不再是左侧一小块） */
+.hm-grid{display:grid;gap:3px;width:100%;min-width:560px}
+.hm-grid .hm-cell{width:auto;height:auto;aspect-ratio:1;min-width:0}
+.hm-month{font-size:10px;color:var(--text3);white-space:nowrap;line-height:14px}
+.hm-daylabel{font-size:10px;color:var(--text3);line-height:1;display:flex;align-items:center}
 .dora-row:last-child{border-bottom:none}
 .dora-name{font-weight:600;min-width:150px;color:var(--text)}
 
@@ -425,6 +437,9 @@ a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,te
 @media (max-width:1024px){.panel-right{width:50%}.cards-grid{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}}
 @media (max-width:900px){.panel-split{flex-direction:column;overflow:auto}.panel-left,.panel-right{width:100%;border-right:none;border-bottom:1px solid var(--border);max-height:50vh;flex:1}.cards-grid{grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}.repo-card:hover{transform:none}}
 @media (max-width:640px){.toolbar{flex-wrap:wrap;gap:8px}.toolbar-left,.toolbar-right{flex-wrap:wrap}.cards-grid{grid-template-columns:1fr}.header{padding:0 12px}.header .subtitle{display:none}.tabs{padding:0 8px}.heatmap{overflow-x:auto;max-width:100%}.repo-card{padding:12px}}
+/* 窄屏：tab 栏改成换行而不是横向滚动 —— 横向滚动会把「更多」下拉裁在容器里，
+   用户点开看不到菜单；chips 已 nowrap，靠父容器 wrap 换行 */
+@media (max-width:520px){.tabs{flex-wrap:wrap;overflow:visible;height:auto;padding:0 4px}.tab{height:34px;padding:0 10px;font-size:12px}.badge{flex-shrink:0}}
 
 </style>
 </head>
@@ -891,25 +906,49 @@ async function api(path, opts={}) {
     return null;
   }
 }
-function timeAgo(dateStr) {
-  if (!dateStr) return '';
+function timeAgo(dateStr, ts) {
+  if (!dateStr && ts == null) return '';
   try {
-    // git %ai 形如 '2026-08-21 14:30:00 +0800'：截到秒、去时区后按本地时间解析，
-    // 否则 Date 解析失败会永远退回原始字符串、显示不出"X 分钟前"
-    let iso = String(dateStr).trim().slice(0, 19).replace(' ', 'T');
-    if (iso.length === 16) iso += ':00';
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return dateStr.slice(0, 16);
-    const s = (Date.now() - d.getTime()) / 1000;
+    let ms;
+    if (ts != null && !isNaN(Number(ts))) {
+      // 后端给的 Unix 时间戳最可靠：不依赖浏览器时区，也不怕日期串被截断
+      ms = Number(ts) * 1000;
+    } else {
+      // 解析 git 日期串：'2026-08-21 14:30:00 +0800' / '2026-08-21T14:30:00+08:00' / '2026-08-21'
+      // ⚠ 不能简单截断时区：截掉 +0800 后按本地时间解析，跨时区提交会整体偏移
+      let s = String(dateStr).trim();
+      const m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)?\s*([+-]\d{2}:?\d{2}|Z)?/);
+      if (!m) return s.slice(0, 16);
+      let iso = m[1];
+      if (m[2]) {
+        iso += 'T' + (m[2].length === 5 ? m[2] + ':00' : m[2]);
+        if (m[3]) iso += m[3].replace(/^([+-]\d{2})(\d{2})$/, '$1:$2');
+      }
+      const d = new Date(iso);
+      ms = d.getTime();
+      if (isNaN(ms)) return s.slice(0, 16);
+    }
+    const s = (Date.now() - ms) / 1000;
     if (s < 0) return '刚刚';
     if (s < 60) return '刚刚';
     if (s < 3600) return Math.floor(s/60) + ' 分钟前';
     if (s < 86400) return Math.floor(s/3600) + ' 小时前';
     if (s < 604800) return Math.floor(s/86400) + ' 天前';
-    return dateStr.slice(0, 10);
+    return new Date(ms).toLocaleDateString('zh-CN');
   } catch(e) {
-    return dateStr ? dateStr.slice(0, 16) : '';
+    return dateStr ? String(dateStr).slice(0, 16) : '';
   }
+}
+function fmtSize(bytes) {
+  // 小文件别再显示成 "0 KB"：<1KB 用 B，<1MB 用 KB，其余 MB/GB，保留一位小数
+  const n = Number(bytes);
+  if (!isFinite(n) || n <= 0) return '0 B';
+  if (n < 1024) return n + ' B';
+  const kb = n / 1024;
+  if (kb < 1024) return (kb < 10 ? kb.toFixed(1) : Math.round(kb)) + ' KB';
+  const mb = kb / 1024;
+  if (mb < 1024) return (mb < 10 ? mb.toFixed(1) : Math.round(mb)) + ' MB';
+  return (mb / 1024).toFixed(2) + ' GB';
 }
 function esc(s) {
   // ⚠ 必须转义引号：esc 结果会拼进 onclick/oncontextmenu 等属性，
@@ -1124,7 +1163,7 @@ async function showFileHistory() {
     `<div class="commit-item" data-repo="${esc(name)}" data-hash="${c.hash}">
       <div class="commit-graph"><div class="commit-dot" style="background:${LANES[i % LANES.length]}"></div>${i < list.length - 1 ? '<div class="commit-line"></div>' : ''}</div>
       <div class="commit-info"><div class="commit-msg">${esc(c.message)}</div>
-      <div class="commit-meta"><span class="commit-hash">${c.hash7}</span><span>${esc(c.author)}</span><span>${timeAgo(c.date)}</span></div></div>
+      <div class="commit-meta"><span class="commit-hash">${c.hash7}</span><span>${esc(c.author)}</span><span>${timeAgo(c.date, c.ts)}</span></div></div>
     </div>`).join('');
   openSimpleModal(`📜 文件历史 · ${esc(f.path)} <span class="panel-count">${list.length}</span>`,
     `<div style="max-height:62vh;overflow:auto">${rows || '<div class="empty-state"><div class="text">该文件没有提交历史</div></div>'}</div>`);
@@ -1727,7 +1766,7 @@ function renderCards(filter='all') {
           <div style="display:flex;align-items:center;gap:8px">${avatar}<div class="repo-name">${esc(name)}</div></div>
           <div class="status-badge invalid"><span class="status-dot invalid"></span> 无效</div>
         </div>
-        <div class="card-msg" style="color:var(--text3)" title="${esc(r.path||'')}">路径无效：${esc(r.path||r.error||'')}</div>
+        <div class="card-msg" style="color:var(--text3)" title="${esc(r.path||'')}">无法读取：${esc(r.error||r.path||'未知原因')}</div>
         <div class="card-footer">
           <span>检查目录是否存在 / 是否为 git 仓库</span>
           <button class="btn btn-sm" onclick="event.stopPropagation();openSettings()">去设置修复</button>
@@ -1755,10 +1794,10 @@ function renderCards(filter='all') {
         <span style="display:flex;gap:6px">
           ${r.last_hash ? `<span class="commit-hash">${r.last_hash.slice(0,7)}</span>` : ''}
           <span class="card-actions">
-          <button class="card-action-btn" title="获取远程更新" onclick="onCardQuickAction(event,'fetch','${esc(name)}')">🔄</button>
-          ${r.behind > 0 ? `<button class="card-action-btn" title="拉取 ${r.behind} 个落后提交" onclick="onCardQuickAction(event,'pull','${esc(name)}')">⬇</button>` : ''}
+          <button class="card-action-btn" title="获取远程更新" onclick="onCardQuickAction(event,'fetch','${jsq(name)}')">🔄</button>
+          ${r.behind > 0 ? `<button class="card-action-btn" title="拉取 ${r.behind} 个落后提交" onclick="onCardQuickAction(event,'pull','${jsq(name)}')">⬇</button>` : ''}
         </span>
-          <button class="btn btn-sm btn-primary" title="打开工作台（也可双击卡片）" onclick="event.stopPropagation();goWorkspace('${esc(name)}')">🛠 工作台</button>
+          <button class="btn btn-sm btn-primary" title="打开工作台（也可双击卡片）" onclick="event.stopPropagation();goWorkspace('${jsq(name)}')">🛠 工作台</button>
         </span>
       </div>
     </div>`;
@@ -2167,7 +2206,7 @@ async function selectRepo(name) {
         <div class="commit-meta">
           <span class="commit-hash">${hash7}</span>
           <span>${esc(c.author)}</span>
-          <span>${timeAgo(c.date)}</span>
+          <span>${timeAgo(c.date, c.ts)}</span>
         </div>
       </div>
     </div>`;
@@ -2200,14 +2239,29 @@ function diffLinesHtml(text) {
   const lines = String(text || '').split('\n');
   const shown = Math.min(lines.length, DIFF_MAX_LINES);
   let html = '';
+  // 行号：从 @@ -a,b +c,d @@ 里取起始行，后续按 add/del/context 各自递增
+  let oldNo = 0, newNo = 0;
   for (let i = 0; i < shown; i++) {
     const line = lines[i];
-    let cls = '';
-    if (line.startsWith('+') && !line.startsWith('+++')) cls = 'add';
-    else if (line.startsWith('-') && !line.startsWith('---')) cls = 'del';
-    else if (line.startsWith('@@')) cls = 'hunk';
-    else if (/^(diff |index |--- |\+\+\+ |new file|deleted file|rename )/.test(line)) cls = 'meta';
-    html += `<div class="diff-line ${cls}">${esc(line)}</div>`;
+    let cls = '', o = '', n = '';
+    const h = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (h) {
+      oldNo = +h[1];
+      newNo = +h[2];
+      cls = 'hunk';
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      cls = 'add';
+      n = newNo++;
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      cls = 'del';
+      o = oldNo++;
+    } else if (/^(diff |index |--- |\+\+\+ |new file|deleted file|rename |similarity |old mode|new mode)/.test(line)) {
+      cls = 'meta';
+    } else {
+      o = oldNo++;
+      n = newNo++;
+    }
+    html += `<div class="diff-line ${cls}"><span class="ln">${o}</span><span class="ln">${n}</span><span class="lc">${esc(line) || ' '}</span></div>`;
   }
   if (lines.length > DIFF_MAX_LINES) {
     html += `<div class="diff-line meta" style="padding:10px;text-align:center">⚠ 差异过大，仅显示前 ${DIFF_MAX_LINES} 行（共 ${lines.length} 行）</div>`;
@@ -2405,7 +2459,7 @@ function renderSearchResults(commits) {
       <div class="commit-graph"><div class="commit-dot" style="background:${LANES[i%LANES.length]}"></div>${i<commits.length-1?'<div class="commit-line"></div>':''}</div>
       <div class="commit-info">
         <div class="commit-msg">${esc(c.message)}</div>
-        <div class="commit-meta"><span class="commit-hash">${c.hash7}</span><span>${esc(c.author)}</span><span>${timeAgo(c.date)}</span></div>
+        <div class="commit-meta"><span class="commit-hash">${c.hash7}</span><span>${esc(c.author)}</span><span>${timeAgo(c.date, c.ts)}</span></div>
       </div>
     </div>`;
   });
@@ -2424,7 +2478,7 @@ function searchCommits() {
         <div class="commit-graph"><div class="commit-dot" style="background:${LANES[i%LANES.length]}"></div>${i<commits.length-1?'<div class="commit-line"></div>':''}</div>
         <div class="commit-info">
           <div class="commit-msg">${esc(c.message)}</div>
-          <div class="commit-meta"><span class="commit-hash">${c.hash7}</span><span>${esc(c.author)}</span><span>${timeAgo(c.date)}</span></div>
+          <div class="commit-meta"><span class="commit-hash">${c.hash7}</span><span>${esc(c.author)}</span><span>${timeAgo(c.date, c.ts)}</span></div>
         </div>
       </div>`;
     });
@@ -2486,7 +2540,10 @@ function fillWsList(container, idxList, emptyMsg) {
   const groups = new Map();
   idxList.forEach(i => {
     const p = wsFiles[i].path || '';
-    const dir = p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '（根目录）';
+    // 未跟踪目录的 path 形如 "src/newdir/"，末尾斜杠会让 lastIndexOf('/') 落在结尾，
+    // 目录因此自成一组、组内又是同名条目（还会点开报错）。先去掉尾斜杠再取父目录。
+    const clean = p.replace(/\/+$/, '');
+    const dir = clean.includes('/') ? clean.slice(0, clean.lastIndexOf('/') + 1) : '（根目录）';
     if (!groups.has(dir)) groups.set(dir, []);
     groups.get(dir).push(i);
   });
@@ -2555,6 +2612,8 @@ async function wsQuickOp(act, i) {
     if (!f) return;
     document.querySelectorAll('.ws-file.selected').forEach(x => x.classList.remove('selected'));
     row.classList.add('selected');
+    // 未跟踪目录没有可预览的文件内容，避免 get_worktree_diff 打开目录报错
+    if (/\/$/.test(f.path)) { toast('这是未跟踪目录，可用行内 🗑 丢弃；目录内文件请展开查看', 'info'); return; }
     previewFile(f.path, !!f.untracked, !!f.staged);
   });
 });
@@ -3130,7 +3189,7 @@ async function doCompare(btn) {
     data.commits.forEach((c,i) => {
       ch += `<div class="commit-item"><div class="commit-graph"><div class="commit-dot" style="background:${LANES[i%LANES.length]}"></div>${i<data.commits.length-1?'<div class="commit-line"></div>':''}</div>
         <div class="commit-info"><div class="commit-msg">${esc(c.message)}</div>
-        <div class="commit-meta"><span class="commit-hash">${c.hash7}</span><span>${esc(c.author)}</span><span>${timeAgo(c.date)}</span></div></div></div>`;
+        <div class="commit-meta"><span class="commit-hash">${c.hash7}</span><span>${esc(c.author)}</span><span>${timeAgo(c.date, c.ts)}</span></div></div></div>`;
     });
     $('cmpCommitList').innerHTML = ch || '<div class="empty-state"><div class="icon">✅</div><div class="text">没有差异</div></div>';
     let fh = '';
@@ -3264,7 +3323,7 @@ async function loadGraph() {
       ${pills}
       <span class="g-msg">${esc(c.message || '')}</span>
       <span class="g-author">${esc(c.author || '')}</span>
-      <span class="g-time">${timeAgo(c.date)}</span>
+      <span class="g-time">${timeAgo(c.date, c.ts)}</span>
     </div>`;
   }).join('');
 
@@ -3302,28 +3361,53 @@ $('graphContainer').addEventListener('click', async (e) => {
 // ============================================================
 function initStats() { loadStats(); loadDora(); loadHeatmap(); }
 
-/* GitHub 风格贡献热力图（数据源 /api/stats 的 by_date，近一年） */
+/* GitHub 风格贡献热力图（数据源 /api/stats 的 by_date，近一年）
+   网格列宽均分铺满容器，并补上月份/星期标签——旧版固定 12px 格子只占左半块，
+   除了"哪天绿过"读不出任何信息 */
 async function loadHeatmap() {
   const host = document.getElementById('heatmap');
   if (!host) return;
   const d = await api('/api/stats?days=365');
-  host.innerHTML = !d || !d.by_date ? '<span style="font-size:12px;color:var(--text3)">热力图加载失败</span>' : '';
-  if (!d || !d.by_date) return;
+  if (!d || !d.by_date) { host.innerHTML = '<span style="font-size:12px;color:var(--text3)">热力图加载失败</span>'; return; }
   const byDate = d.by_date || {};
   const max = Math.max(1, ...Object.values(byDate));
-  // 从今天往前推 52 周，补齐为以周一结尾的网格
+  const DAY = 86400000;
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const cells = [];
-  for (let i = 364; i >= 0; i--) {
-    const dt = new Date(today.getTime() - i * 86400000);
-    const key = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
-    const cnt = byDate[key] || 0;
-    const lvl = cnt === 0 ? 0 : Math.min(4, Math.ceil(cnt / max * 4));
-    cells.push(`<div class="hm-cell" title="${key}：${cnt} 次提交" data-l="${lvl}"></div>`);
+  // 起点对齐到周一，保证每列正好 7 天
+  const start = new Date(today.getTime() - 364 * DAY);
+  const startDow = (start.getDay() + 6) % 7;          // 周一 = 0
+  const gridStart = new Date(start.getTime() - startDow * DAY);
+  const weeks = Math.ceil((Math.floor((today - gridStart) / DAY) + 1) / 7);
+  const keyOf = dt => dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+  let cells = '', months = '', lastMonth = -1;
+  for (let w = 0; w < weeks; w++) {
+    const monday = new Date(gridStart.getTime() + w * 7 * DAY);
+    // 跨入新月份时在该列上方标一次，避免 12 个标签挤在一起
+    if (monday.getMonth() !== lastMonth) {
+      lastMonth = monday.getMonth();
+      months += `<span class="hm-month" style="grid-column:${w + 2};grid-row:1">${lastMonth + 1}月</span>`;
+    }
+    for (let day = 0; day < 7; day++) {
+      const dt = new Date(monday.getTime() + day * DAY);
+      const pos = `grid-column:${w + 2};grid-row:${day + 2}`;
+      if (dt > today) { cells += `<div class="hm-cell" style="${pos};opacity:0"></div>`; continue; }
+      const key = keyOf(dt);
+      const cnt = byDate[key] || 0;
+      const lvl = cnt === 0 ? 0 : Math.min(4, Math.ceil(cnt / max * 4));
+      cells += `<div class="hm-cell" data-l="${lvl}" style="${pos}" title="${key}：${cnt} 次提交"></div>`;
+    }
   }
   host.innerHTML = `
     <div style="font-size:13px;color:var(--text2);margin-bottom:6px">🔥 提交热力图（近 365 天）</div>
-    <div style="display:grid;grid-template-rows:repeat(7,12px);grid-auto-flow:column;grid-auto-columns:12px;gap:3px;overflow-x:auto;padding-bottom:4px">${cells.join('')}</div>
+    <div style="overflow-x:auto;padding-bottom:2px">
+      <div class="hm-grid" style="grid-template-columns:18px repeat(${weeks},minmax(0,1fr));grid-template-rows:14px repeat(7,minmax(0,1fr))">
+        ${months}
+        <span class="hm-daylabel" style="grid-column:1;grid-row:2">一</span>
+        <span class="hm-daylabel" style="grid-column:1;grid-row:4">三</span>
+        <span class="hm-daylabel" style="grid-column:1;grid-row:6">五</span>
+        ${cells}
+      </div>
+    </div>
     <div style="display:flex;gap:4px;align-items:center;margin-top:6px;font-size:11px;color:var(--text3)">
       少 <div class="hm-cell" data-l="0"></div><div class="hm-cell" data-l="1"></div><div class="hm-cell" data-l="2"></div><div class="hm-cell" data-l="3"></div><div class="hm-cell" data-l="4"></div> 多
     </div>`;
@@ -3383,33 +3467,59 @@ async function loadStats() {
   const scope = $('statsScope') ? $('statsScope').value : 'all';
   const data = await api(`/api/stats?days=${days}&scope=${scope}`);
   if (!data) return;
-  // Author bar chart
-  const authors = Object.entries(data.by_author).sort((a,b) => b[1]-a[1]).slice(0,10);
+  // 作者数据（作者卡片在类型分布之后渲染）
+  const authorAll = Object.entries(data.by_author || {});
+  const authorTotal = authorAll.reduce((s,[,c])=>s+c, 0) || 1;
+  const authors = authorAll.sort((a,b) => b[1]-a[1]).slice(0,10);
   const maxCount = authors.length ? authors[0][1] : 1;
   let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
   // 提交类型
+  // 提交类型：按最大值定标 + 顶部刻度，右侧同时给数量与占比（旧版只有数量，条形长度无参照）
+  const typeEntries = Object.entries(data.by_type || {}).sort((a,b)=>b[1]-a[1]);
+  const typeTotal = typeEntries.reduce((s,[,c])=>s+c, 0) || 1;
+  const typeMax = typeEntries.length ? typeEntries[0][1] : 1;
   html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px"><div style="font-size:14px;font-weight:600;margin-bottom:12px">提交类型分布</div>';
-  Object.entries(data.by_type).sort((a,b)=>b[1]-a[1]).forEach(([type, count]) => {
-    const pct = (count / Object.values(data.by_type).reduce((a,b)=>a+b,1) * 100).toFixed(1);
+  if (typeEntries.length) {
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:10px;color:var(--text3)">
+      <span style="width:80px"></span>
+      <div style="flex:1;display:flex;justify-content:space-between"><span>0</span><span>${typeMax}</span></div>
+      <span style="width:76px"></span>
+    </div>`;
+  } else {
+    html += '<div style="font-size:12.5px;color:var(--text3);padding:8px 0">暂无数据</div>';
+  }
+  typeEntries.forEach(([type, count]) => {
+    const pct = (count / typeTotal * 100).toFixed(1);
+    const w = Math.max(2, count / typeMax * 100);
     html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-      <span style="width:80px;font-size:12px;color:var(--text2)">${esc(type)}</span>
+      <span style="width:80px;font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(type)}">${esc(type)}</span>
       <div style="flex:1;height:20px;background:var(--hover);border-radius:4px;overflow:hidden">
-        <div style="height:100%;width:${pct}%;background:var(--blue);border-radius:4px"></div>
+        <div style="height:100%;width:${w}%;background:var(--blue);border-radius:4px"></div>
       </div>
-      <span style="width:50px;text-align:right;font-size:12px;font-weight:600">${count}</span>
+      <span style="width:76px;text-align:right;font-size:11px;color:var(--text2)"><b>${count}</b> · ${pct}%</span>
     </div>`;
   });
   html += '</div>';
-  // 作者排行
+  // 作者排行：条形按最大值定标（单条不再拉满整行），右侧给数量与占比
   html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px"><div style="font-size:14px;font-weight:600;margin-bottom:12px">作者提交排行</div>';
+  if (authors.length) {
+    html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:10px;color:var(--text3)">
+      <span style="width:100px"></span>
+      <div style="flex:1;display:flex;justify-content:space-between"><span>0</span><span>${maxCount}</span></div>
+      <span style="width:76px"></span>
+    </div>`;
+  } else {
+    html += '<div style="font-size:12.5px;color:var(--text3);padding:8px 0">暂无数据</div>';
+  }
   authors.forEach(([author, count]) => {
     const pct = (count / maxCount * 100).toFixed(1);
+    const share = (count / authorTotal * 100).toFixed(1);
     html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
       <span style="width:100px;font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(author)}">${esc(author)}</span>
       <div style="flex:1;height:20px;background:var(--hover);border-radius:4px;overflow:hidden">
-        <div style="height:100%;width:${pct}%;background:var(--green);border-radius:4px"></div>
+        <div style="height:100%;width:${Math.min(96, Math.max(2, +pct))}%;background:var(--green);border-radius:4px"></div>
       </div>
-      <span style="width:40px;text-align:right;font-size:12px;font-weight:600">${count}</span>
+      <span style="width:76px;text-align:right;font-size:11px;color:var(--text2)"><b>${count}</b> · ${share}%</span>
     </div>`;
   });
   html += '</div></div>';
@@ -3533,8 +3643,8 @@ async function loadBranches() {
     const isCur = b.name === cur;
     html += `<div class="branch-row" data-name="${esc(b.name)}" style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer" onclick="checkoutBranch('${jsq(name)}','${jsq(b.name)}')">
       <span style="font-size:13px">${esc(b.name)}${isCur ? ' <span class="file-tag A">当前</span>' : ''}</span>
-      <span style="font-size:11px;color:var(--text3)">${esc(b.hash7)} · ${timeAgo(b.date)}</span>
-      <span style="flex:1"></span>
+      <span style="font-size:11px;color:var(--text3)">${esc(b.hash7)} · ${timeAgo(b.date, b.ts)}</span>
+      <span style="flex:1;max-width:160px"></span>
       ${b.ahead ? `<span class="stat up">↑${b.ahead}</span>` : ''}
       ${b.behind ? `<span class="stat down">↓${b.behind}</span>` : ''}
       ${isCur ? '' : `<button class="btn btn-sm btn-danger" title="删除分支" onclick="event.stopPropagation();deleteBranch('${jsq(name)}','${jsq(b.name)}')">🗑</button>`}
@@ -3546,7 +3656,7 @@ async function loadBranches() {
   remotes.forEach(b => {
     html += `<div class="branch-row" data-name="${esc(b.name)}" style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)">
       <span style="font-size:13px;color:var(--text2)">${esc(b.name)}</span>
-      <span style="font-size:11px;color:var(--text3)">${esc(b.hash7)} · ${timeAgo(b.date)}</span>
+      <span style="font-size:11px;color:var(--text3)">${esc(b.hash7)} · ${timeAgo(b.date, b.ts)}</span>
     </div>`;
   });
   html += '</div>';
@@ -3618,7 +3728,7 @@ function renderStashList() {
   list.forEach(s => {
     html += `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)">
       <span style="font-size:13px;font-family:var(--mono)">${esc(s.ref)}</span>
-      <span style="flex:1;font-size:13px">${esc(s.msg)}</span>
+      <span style="flex:1;max-width:560px;min-width:120px;font-size:13px">${esc(s.msg)}</span>
       <span style="font-size:11px;color:var(--text3)">${timeAgo(s.date)}</span>
       <button class="btn btn-sm" onclick="applyStash('${jsq(name)}','${jsq(s.ref)}')">应用</button>
       <button class="btn btn-sm btn-danger" onclick="dropStash('${jsq(name)}','${jsq(s.ref)}')">删除</button>
@@ -3704,8 +3814,8 @@ async function loadHealthDetail() {
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:8px;color:var(--text3)">文件</th><th style="text-align:right;padding:8px;color:var(--text3)">大小</th></tr>`;
     largest.forEach(f => {
-      const sizeKB = f.size / 1024;
-      const sizeStr = sizeKB >= 1024 ? (sizeKB/1024).toFixed(1) + ' MB' : sizeKB.toFixed(0) + ' KB';
+      // 统一走 fmtSize：小于 1 KB 显示 B，不再一律 "0 KB"
+      const sizeStr = fmtSize(f.size);
       html += `<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px;font-family:var(--mono);color:var(--text)">${esc(f.path)}</td><td style="text-align:right;padding:8px;color:var(--text2)">${sizeStr}</td></tr>`;
     });
     html += '</table></div></div>';
@@ -3832,7 +3942,7 @@ async function loadTags() {
     html += `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)">
       <span style="font-size:13px;font-weight:600;color:var(--blue)">🏷 ${esc(t.name)}</span>
       <span style="font-size:11px;font-family:var(--mono);color:var(--text3)">${esc(t.hash)}</span>
-      <span style="flex:1"></span>
+      <span style="flex:1;max-width:160px"></span>
       <span style="font-size:11px;color:var(--text3)">${esc(t.date)}</span>
       <button class="btn btn-sm" onclick="pushTag('${jsq(name)}','${jsq(t.name)}')">推送</button>
       <button class="btn btn-sm btn-danger" onclick="deleteTag('${jsq(name)}','${jsq(t.name)}')">删除</button>

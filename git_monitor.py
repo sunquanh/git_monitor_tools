@@ -157,8 +157,16 @@ else:
 
 CONFIG_PATH = os.path.join(_BASE, "git_monitor.json")
 
+# interactive rebase 允许的动作白名单（todo 文件里的合法指令子集）
+REBASE_ACTIONS = ("pick", "squash", "fixup", "reword", "drop")
+# 提交哈希：4~40 位十六进制（允许短哈希）；不含 exec 等指令关键字
+_COMMIT_HASH_RE = re.compile(r"^[0-9a-fA-F]{4,40}$")
+
 DEFAULT_CONFIG = {
     "refresh_interval": 30,
+    # 网络命令（fetch/pull/push）超时秒数：大仓库首次抓取或 VPN 抖动时
+    # 15s/30s 必然假失败，默认放宽到 120s，可在配置里按需调整（10~1800）
+    "net_timeout": 120,
     "theme": "light",
     "auto_refresh": True,
     "sound": True,
@@ -209,6 +217,10 @@ def load_config():
                 cfg["refresh_interval"] = max(5, int(cfg.get("refresh_interval", 30)))
             except Exception:
                 cfg["refresh_interval"] = 30
+            try:
+                cfg["net_timeout"] = max(10, min(int(cfg.get("net_timeout", 120)), 1800))
+            except Exception:
+                cfg["net_timeout"] = 120
             cfg.setdefault("repos", {})
             cfg.setdefault("compare", DEFAULT_CONFIG["compare"])
             cfg.setdefault("presets", [])
@@ -492,6 +504,32 @@ def _git_env(extra=None):
     return full
 
 
+def git2(repo_path, *args, timeout=15, env=None, input=None):
+    """执行 git 命令，返回 (stdout, stderr, returncode) —— stdout 与 stderr 严格分离。
+
+    为什么要有它：git() 在失败且无 stdout 时会把 stderr 塞进返回值，调用方拿到的
+    「输出」其实是 `fatal: ...` 这类错误文本。空仓库的 log 就是典型：卡片上直接显示
+    `fatal: your current branch 'main' does not have any commits yet`，超时消息还会被
+    状态解析当成"1 个未提交变更"扣健康分。需要区分「结果」和「错误」的地方用 git2。
+    """
+    full_env = _git_env(env)
+    try:
+        git_cmd = ["git", "-C", repo_path, "-c", "core.quotePath=false",
+                   "-c", f"safe.directory={repo_path}"] + list(args)
+        r = subprocess.run(
+            git_cmd,
+            capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace", env=full_env,
+            input=input, creationflags=_SUBPROC_FLAGS
+        )
+        # rstrip 而非 strip：porcelain 首行是 " M file"，前导空格有语义（见 git()）
+        return (r.stdout or "").rstrip(), (r.stderr or "").rstrip(), r.returncode
+    except subprocess.TimeoutExpired:
+        return "", f"git {args[0] if args else ''} 超时（超过 {timeout}s）", 124
+    except Exception as e:
+        return "", str(e), 1
+
+
 def git(repo_path, *args, timeout=15, env=None, input=None):
     """执行 git 命令，返回 (stdout, returncode)。
     本地命令默认 15s 超时（status/log/diff 足够）；网络命令（fetch/pull/push）
@@ -499,30 +537,16 @@ def git(repo_path, *args, timeout=15, env=None, input=None):
     env: 在「当前环境 + _BASE_GIT_ENV」基础上覆盖的环境变量（如 GIT_EDITOR）。
     input: 作为 stdin 传给 git（check-ignore --stdin / apply - / am - 需要）。
     带 -c core.quotePath=false: 非 ASCII 文件名(中文/特殊字符)在 status/diff
-    numstat 等输出中原样显示, 否则会被 C 风格八进制转义导致路径解析失败。"""
+    numstat 等输出中原样显示, 否则会被 C 风格八进制转义导致路径解析失败。
+    兼容旧调用：失败且无 stdout 时把 stderr 透出（新代码请用 git2 区分两者）。"""
     # 非交互环境：GIT_TERMINAL_PROMPT=0 让缺凭据的 fetch/pull/push 直接失败返回，
     # 而不是在无 tty 的工作线程里等一个永远不会到来的密码输入（会一直挂到超时）。
     # GIT_PAGER=cat 避免某些全局配置把输出接到分页器。调用方 env 仍可覆盖。
-    full_env = _git_env(env)
-    try:
-        # 自动添加 safe.directory 配置以解决多用户环境下的所有权问题
-        git_cmd = ["git", "-C", repo_path, "-c", "core.quotePath=false", "-c", f"safe.directory={repo_path}"] + list(args)
-        r = subprocess.run(
-            git_cmd,
-            capture_output=True, text=True, timeout=timeout,
-            encoding="utf-8", errors="replace", env=full_env,
-            input=input, creationflags=_SUBPROC_FLAGS
-        )
-        # ⚠️ 必须 rstrip 而非 strip: porcelain 第一行是 " M file" 这种以空格开头
-        # 的未暂存状态, strip() 会把首行前导空格剥掉 → XY 列错位、路径左移一位,
-        # 工作台把第一个文件误判为"已暂存"、路径变 ".txt" 之类 → 暂存/丢弃全失效。
-        out = r.stdout.rstrip()
-        # 失败且无 stdout 时把 stderr 透出(否则调用方只能看到 rc 号, 看不到真实报错)
-        if r.returncode != 0 and not out:
-            out = (r.stderr or "").rstrip()
-        return out, r.returncode
-    except Exception as e:
-        return str(e), 1
+    out, err, rc = git2(repo_path, *args, timeout=timeout, env=env, input=input)
+    # 失败且无 stdout 时把 stderr 透出(否则调用方只能看到 rc 号, 看不到真实报错)
+    if rc != 0 and not out:
+        out = err
+    return out, rc
 
 
 def _unquote_git_path(s):
@@ -579,10 +603,20 @@ def get_status(repo_path):
     if not os.path.isdir(repo_path):
         return {"invalid": True, "branch": "N/A", "uncommitted": 0,
                 "ahead": 0, "behind": 0, "last_commit": "路径无效",
+                "error": "路径不存在或不是目录",
                 "last_date": "", "last_hash": "", "added": 0, "removed": 0}
 
     branch, ahead, behind, uncommitted, have_ab = "N/A", 0, 0, 0, False
-    out, _ = git(repo_path, "status", "--porcelain=v2", "--branch")
+    # 用 git2 严格区分 stdout/stderr：status 失败（权限/损坏/超时）时 stdout 是空的，
+    # 不会把错误文本当成 porcelain 行计进未提交数
+    out, st_err, st_rc = git2(repo_path, "status", "--porcelain=v2", "--branch")
+    if st_rc != 0:
+        return {"invalid": True, "branch": "N/A", "uncommitted": 0,
+                "ahead": 0, "behind": 0,
+                "error": (st_err.splitlines() or ["读取仓库状态失败"])[0][:120],
+                "last_commit": "无法读取仓库状态",
+                "last_date": "", "last_hash": "", "last_author": "",
+                "added": 0, "removed": 0, "health": 0}
     for line in out.splitlines():
         if line.startswith("# branch.head "):
             branch = line[len("# branch.head "):].strip() or "N/A"
@@ -616,17 +650,24 @@ def get_status(repo_path):
                     pass
 
     # 一次 log 同时取短哈希/完整哈希/日期/标题/作者，省一次 git 进程启动
-    last, _ = git(repo_path, "log", "-1", "--format=%h|%H|%ai|%s|%an")
+    # ⚠ 必须用 git2：空仓库时 git() 会把 "fatal: your current branch ..." 当输出返回，
+    # 卡片上就会显示这行 fatal 文本（已复现）
+    last, last_err, last_rc = git2(repo_path, "log", "-1", "--format=%h|%H|%ai|%s|%an")
     last_hash = ""
     last_date = ""
     last_author = ""
-    if "|" in last:
+    last_commit = ""
+    if last_rc == 0 and "|" in last:
         parts = last.split("|", 4)
         h, full_h, d, s = parts[0], parts[1], parts[2], parts[3]
         last_author = parts[4] if len(parts) > 4 else ""
-        last = f"{h} - {s}"
+        last_commit = f"{h} - {s}"
         last_date = d
         last_hash = full_h
+    elif last_rc != 0:
+        # 空仓库是正常状态（新 init 还没提交），其余才是真的读不出来
+        last_commit = ("无提交" if "does not have any commits" in (last_err or "")
+                       else "读取提交失败")
 
     # 变更量徽章：vs HEAD 的净增/删行数（未跟踪文件不计；无变更时不跑 numstat 省一次调用）
     added = removed = 0
@@ -655,7 +696,7 @@ def get_status(repo_path):
         "uncommitted": uncommitted,
         "ahead": ahead,
         "behind": behind,
-        "last_commit": last or "无提交",
+        "last_commit": last_commit or "无提交",
         "last_date": last_date,
         "last_hash": last_hash or "",
         "last_author": last_author,
@@ -665,8 +706,38 @@ def get_status(repo_path):
     }
 
 
+def _git_date_ts(s):
+    """把 git 日期串转成 Unix 时间戳（秒）；解析失败返回 None。
+
+    为什么要单独给时间戳：`%ai` 形如 `2026-10-20 13:47:23 +0800`，前端若把时区
+    截掉再按本地时间解析，跨时区提交就会算错；而 `authordate:short` 只有日期，
+    更会让"1 分钟前"显示成"3 小时前"。时间戳不依赖两端时区，最稳。
+    """
+    try:
+        txt = str(s or "").strip()
+        if not txt:
+            return None
+        txt = txt.replace("T", " ")
+        if txt.endswith("Z"):
+            txt = txt[:-1] + "+0000"
+        txt = re.sub(r"\.\d+", "", txt)          # 去掉小数秒
+        txt = re.sub(r"\s{2,}", " ", txt)
+        # %z 同时接受 +0800 与 +08:00（Python 3.7+）
+        for fmt in ("%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d %H:%M:%S%z",
+                    "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(txt, fmt)
+            except ValueError:
+                continue
+            return int(dt.timestamp())  # 无时区时按本地时区解释
+    except Exception:
+        pass
+    return None
+
+
 def parse_log(out):
-    """把 `git log --format=%H|%an|%ai|%s` 的输出解析为提交列表"""
+    """把 `git log --format=%H|%an|%ai|%s` 的输出解析为提交列表。
+    date 保留完整字符串（含时区），另附 ts（epoch 秒）供前端算相对时间。"""
     commits = []
     for line in out.splitlines():
         if "|" not in line:
@@ -675,13 +746,14 @@ def parse_log(out):
         if len(parts) == 4:
             commits.append({
                 "hash": parts[0], "hash7": parts[0][:7],
-                "author": parts[1], "date": parts[2][:16], "message": parts[3],
+                "author": parts[1], "date": parts[2],
+                "ts": _git_date_ts(parts[2]), "message": parts[3],
             })
     return commits
 
 
 def get_commits(repo_path, n=50):
-    out, _ = git(repo_path, "log", f"-{n}", "--format=%H|%an|%ai|%s")
+    out, _err, _rc = git2(repo_path, "log", f"-{n}", "--format=%H|%an|%ai|%s")
     return parse_log(out)
 
 
@@ -703,7 +775,7 @@ DIFF_OUTPUT_MAX_BYTES = 100 * 1024
 def get_commit_show(repo_path, commit_hash, max_bytes=DIFF_OUTPUT_MAX_BYTES):
     """提交详情（show --stat -p）。超过 max_bytes 截断，末尾附截断标记，
     避免超大提交拖慢接口响应与前端渲染。"""
-    out, _ = git(repo_path, "show", "--stat", "-p", commit_hash, timeout=30)
+    out, _err, _rc = git2(repo_path, "show", "--stat", "-p", commit_hash, timeout=30)
     data = out.encode("utf-8", errors="replace")
     if max_bytes and len(data) > max_bytes:
         data = data[:max_bytes]
@@ -748,19 +820,41 @@ def get_branches(repo_path):
             [r.strip() for r in remote.splitlines() if r.strip()])
 
 
+def net_timeout():
+    """网络命令超时秒数：配置项 net_timeout，默认 120s（10~1800s）。
+
+    旧版 fetch 固定 15s、pull/push 固定 30s——首次 fetch 大仓库或 VPN 抖动时
+    必然超时，而 git() 会把超时当成普通失败，用户只看到一段英文异常。
+    """
+    try:
+        return max(10, min(int(load_config().get("net_timeout", 120)), 1800))
+    except Exception:
+        return 120
+
+
+def _net_out(out, rc, timeout):
+    """网络命令失败时把超时单独说清楚，避免和认证失败/冲突混在同一个提示里。"""
+    if rc == 124:
+        return f"网络超时（{timeout}s）：仓库较大或网络较慢，可直接重试"
+    return out
+
+
 def repo_fetch(repo_path):
-    out, rc = git(repo_path, "fetch", "--all", "--prune", timeout=15)
-    return out, rc
+    t = net_timeout()
+    out, rc = git(repo_path, "fetch", "--all", "--prune", timeout=t)
+    return _net_out(out, rc, t), rc
 
 
 def repo_pull(repo_path):
-    out, rc = git(repo_path, "pull", timeout=30)
-    return out, rc
+    t = net_timeout()
+    out, rc = git(repo_path, "pull", timeout=t)
+    return _net_out(out, rc, t), rc
 
 
 def repo_push(repo_path):
-    out, rc = git(repo_path, "push", timeout=30)
-    return out, rc
+    t = net_timeout()
+    out, rc = git(repo_path, "push", timeout=t)
+    return _net_out(out, rc, t), rc
 
 
 def repo_checkout(repo_path, target):
@@ -817,6 +911,21 @@ def interactive_rebase(repo_path, onto, actions):
     """
     if not actions:
         return "没有可操作的提交", 1
+    # ⚠ 安全：action 与 hash 会被原样拼进 git rebase todo 文件，而 todo 支持
+    # `exec <shell 命令>`。若不校验，传 {"action": "exec echo pwned > x"} 即可
+    # 在服务端执行任意命令（已复现）。这里只放行五个合法动作 + 纯十六进制哈希。
+    for a in actions:
+        if not isinstance(a, dict):
+            return "actions 参数格式错误（应为对象数组）", 1
+        act = a.get("action", "pick")
+        if act not in REBASE_ACTIONS:
+            return (f"不支持的 rebase 动作: {str(act)[:20]!r}"
+                    f"（仅支持 {'/'.join(REBASE_ACTIONS)}）"), 1
+        if not _COMMIT_HASH_RE.match((a.get("hash") or "").strip()):
+            return f"非法的提交哈希: {str(a.get('hash'))[:40]!r}", 1
+    # onto 同样进 git 参数：禁止以 - 开头（防选项注入）
+    if not isinstance(onto, str) or not onto.strip() or onto.startswith("-"):
+        return "非法的 rebase 基底引用", 1
     # rebase 要求工作区干净，提前给出可读错误而不是 git 的原始报错
     st_out, _ = git(repo_path, "status", "--porcelain")
     if (st_out or "").strip():
@@ -934,12 +1043,43 @@ def get_conflict_content(repo_path, filepath):
     return {'ours': ours, 'theirs': theirs, 'base': base}
 
 
+def _repo_join(repo_path, rel):
+    """把仓库相对路径拼成绝对路径，越界（../、绝对路径、跨盘）返回 None。
+    用于所有「按前端传来的相对路径写/删文件」的场景，防止路径穿越。"""
+    rel = str(rel or "").strip().replace("\\", "/")
+    if not rel or rel.startswith("/") or re.match(r"^[A-Za-z]:", rel):
+        return None
+    root = os.path.realpath(repo_path)
+    full = os.path.realpath(os.path.join(root, rel))
+    if full == root:
+        return None
+    try:
+        if os.path.commonpath([root, full]) != root:
+            return None
+    except ValueError:  # 跨盘符
+        return None
+    return full
+
+
 def resolve_conflict(repo_path, filepath, content):
     """解决冲突：用指定内容覆盖文件并标记为已解决"""
     # 写入解决后的内容
-    full_path = os.path.join(repo_path, filepath)
+    full_path = _repo_join(repo_path, filepath)
+    if not full_path:
+        return "非法的文件路径", 1
+    content = content if isinstance(content, str) else str(content or "")
+    # 保留原文件的行尾风格：浏览器编辑器提交的内容统一是 \n，若原文件是 CRLF，
+    # 直接写入会把整个文件改成 LF（git 里等同于全文件重写）。先探测再归一。
     try:
-        with open(full_path, 'w', encoding='utf-8') as f:
+        with open(full_path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        raw = b""
+    if b"\r\n" in raw and "\r\n" not in content:
+        content = content.replace("\n", "\r\n")
+    try:
+        # newline="" 关掉写入侧的换行翻译，否则 Windows 上 \n 会被强制改成 \r\n
+        with open(full_path, "w", encoding="utf-8", newline="") as f:
             f.write(content)
     except Exception as e:
         return str(e), 1
@@ -1556,18 +1696,31 @@ def search_commits(repo_path, keyword, n=200, author="", since_days=0):
     seen = set()
     base = ["log", "--all", "--format=%H|%an|%ai|%s"]
     if keyword:
-        # 支持正则搜索（以 / 开头）
+        # 支持正则搜索（以 / 开头）。⚠ --perl-regexp 只是「切换引擎」的开关，
+        # 必须跟 --grep 一起用；只传 --perl-regexp 会把模式当成 revision，
+        # git 直接报错 → 恒返回空结果（已复现）。
         use_regex = keyword.startswith("/")
-        grep_flag = "--grep" if not use_regex else "--perl-regexp"
-        out, _ = git(repo_path, *base, f"-{n}", grep_flag, keyword.lstrip("/"), "-i")
+        pattern = keyword[1:] if use_regex else keyword
+        args = list(base) + [f"-{n}"]
+        if use_regex:
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                # 正则写错时给出明确原因，而不是"搜不到"这种误导性结果
+                raise ValueError(f"正则表达式有误: {e}")
+            args += ["--perl-regexp", "--grep", pattern, "-i"]
+        else:
+            args += ["--grep", pattern, "-i"]
+        out, _ = git(repo_path, *args)
         commits = parse_log(out)
         seen = {c["hash"] for c in commits}
-        # 作者名搜索
-        out2, _ = git(repo_path, *base, f"-{n}", "--author", keyword, "-i")
-        for c in parse_log(out2):
-            if c["hash"] not in seen:
-                commits.append(c)
-                seen.add(c["hash"])
+        # 作者名搜索（正则模式下不再重复按作者搜，避免把作者名当正则）
+        if not use_regex:
+            out2, _ = git(repo_path, *base, f"-{n}", "--author", pattern, "-i")
+            for c in parse_log(out2):
+                if c["hash"] not in seen:
+                    commits.append(c)
+                    seen.add(c["hash"])
         # 短哈希搜索
         if re.fullmatch(r"[0-9a-fA-F]{4,40}", keyword):
             out3, rc = git(repo_path, "log", "-1",
@@ -1590,11 +1743,13 @@ def search_commits(repo_path, keyword, n=200, author="", since_days=0):
 
 def get_branch_overview(repo_path):
     """分支概览：本地 + 远程跟踪分支的最新提交 / ahead / behind。
-    返回 [{name, kind, hash7, date, subject, ahead, behind}]（kind: 本地/远程）。"""
-    out, _ = git(repo_path, "for-each-ref",
-                 "--format=%(refname:short)|%(refname)|%(upstream:short)|"
-                 "%(upstream:track)|%(objectname:short)|%(subject)|%(authordate:short)",
-                 "refs/heads", "refs/remotes")
+    返回 [{name, kind, hash7, date, ts, subject, ahead, behind}]（kind: 本地/远程）。
+    日期用 iso-strict（带时间与时区）而不是 authordate:short —— 后者只有日期，
+    前端无法算出"X 分钟前"，会把 1 分钟前的提交显示成"3 小时前"。"""
+    out, _err, _rc = git2(repo_path, "for-each-ref",
+                          "--format=%(refname:short)|%(refname)|%(upstream:short)|"
+                          "%(upstream:track)|%(objectname:short)|%(subject)|%(authordate:iso-strict)",
+                          "refs/heads", "refs/remotes")
     rows = []
     for line in out.splitlines():
         parts = line.split("|", 6)
@@ -1612,7 +1767,8 @@ def get_branch_overview(repo_path):
         if m:
             behind = int(m.group(1))
         rows.append({"name": short, "kind": kind, "hash7": h7,
-                     "date": date, "subject": subj or "（无）",
+                     "date": date, "ts": _git_date_ts(date),
+                     "subject": subj or "（无）",
                      "ahead": ahead, "behind": behind})
     return rows
 
@@ -1620,8 +1776,8 @@ def get_branch_overview(repo_path):
 # ---------- 提交图 / 统计 ----------
 def get_graph_log(repo_path, n=300):
     """`git log --all --topo-order`：带父提交信息，供提交图布局"""
-    out, _ = git(repo_path, "log", "--all", "--topo-order",
-                 f"-{n}", "--format=%H|%P|%an|%ai|%s")
+    out, _err, _rc = git2(repo_path, "log", "--all", "--topo-order",
+                          f"-{n}", "--format=%H|%P|%an|%ai|%s")
     commits = []
     for line in out.splitlines():
         parts = line.split("|", 4)
@@ -1629,7 +1785,8 @@ def get_graph_log(repo_path, n=300):
             commits.append({
                 "hash": parts[0],
                 "parents": [p for p in parts[1].split() if p],
-                "author": parts[2], "date": parts[3][:16],
+                "author": parts[2], "date": parts[3],
+                "ts": _git_date_ts(parts[3]),
                 "message": parts[4],
             })
     return commits
@@ -2171,11 +2328,30 @@ def ws_discard(repo_path, files):
         # 会走 fallback 后诚实报错; 未跟踪文件(新仓库的常态)由下方 os.remove 处理
         msgs.append(out or (f"已还原 {len(tracked)} 个文件" if r2 == 0 else f"还原失败(rc={r2})"))
     for p in untracked:
+        target = _repo_join(repo_path, p)
+        if target is None:
+            # 越界路径：只有「本身就是仓库内符号链接」时允许删链接本身
+            lexical = os.path.join(os.path.realpath(repo_path),
+                                   str(p).replace("\\", "/").lstrip("/"))
+            if os.path.islink(lexical):
+                target = lexical
+            else:
+                msgs.append(f"已跳过非法路径 {p}")
+                rc = 1
+                continue
         try:
-            os.remove(os.path.join(repo_path, p))
-            msgs.append(f"已删除未跟踪文件 {p}")
+            # 未跟踪目录必须用 rmtree：os.remove 对目录在 Windows 上直接 WinError 5，
+            # 而「丢弃未跟踪目录」是工作台里最常见的操作之一
+            if os.path.isdir(target) and not os.path.islink(target):
+                shutil.rmtree(target)
+                msgs.append(f"已删除未跟踪目录 {p}")
+            else:
+                os.remove(target)  # 文件 / 符号链接（含断链）
+                msgs.append(f"已删除未跟踪文件 {p}")
+        except FileNotFoundError:
+            msgs.append(f"文件已不存在 {p}")
         except Exception as e:
-            msgs.append(str(e))
+            msgs.append(f"{p}: {e}")
             rc = 1
     return "\n".join(msgs), rc
 

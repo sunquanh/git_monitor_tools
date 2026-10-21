@@ -43,14 +43,40 @@ log.setLevel(logging.ERROR)
 # 危险操作审计日志
 # ============================================================
 # 追加写 JSONL（一行一条），不参与任何业务逻辑；写失败只吞掉，绝不影响主流程。
-# 记录 reset --hard / 放弃全部改动 / 删分支 / 删标签 / 强制推送 这类不可撤销操作，
-# 便于事后追溯"谁在什么时候动了哪个仓库"。
+# 覆盖范围由 after_request 统一接管：所有写方法（POST/PUT/PATCH/DELETE）只要命中
+# /api/... 就记一条，不再依赖每条路由记得手工调用 —— 避免"新增了危险接口但忘了审计"。
 AUDIT_PATH = os.path.join(gm._BASE, 'git_monitor_audit.jsonl')
 _AUDIT_LOCK = threading.Lock()
+AUDIT_MAX_BYTES = 5 * 1024 * 1024   # 单文件上限，超过就轮转
+AUDIT_KEEP = 3                      # 保留 .1 / .2 两份历史
+# 只读的 POST（取 diff、校验补丁）不写审计，否则日志会被刷新动作刷满
+_AUDIT_SKIP = {'diff', 'check', 'preview'}
+
+
+def _rotate_audit_locked():
+    """调用方必须已持有 _AUDIT_LOCK。按大小轮转，避免长期运行后单文件无限膨胀。"""
+    try:
+        if os.path.getsize(AUDIT_PATH) < AUDIT_MAX_BYTES:
+            return
+    except OSError:
+        return
+    for i in range(AUDIT_KEEP - 1, 0, -1):
+        src = f'{AUDIT_PATH}.{i}'
+        if os.path.exists(src):
+            try:
+                os.replace(src, f'{AUDIT_PATH}.{i + 1}')
+            except OSError:
+                pass
+    try:
+        os.replace(AUDIT_PATH, f'{AUDIT_PATH}.1')
+    except OSError:
+        pass
 
 
 def _audit(op, repo, detail='', ok=True):
-    """追加一条审计记录。op: reset/discard-all/delete-branch/tag-delete/push-force。"""
+    """追加一条审计记录。
+    src 取真实 TCP 对端地址（client_address），**不再信任 X-Forwarded-For** ——
+    那个头任意客户端都能伪造；若存在则单独记到 xff 字段仅作参考。"""
     try:
         rec = {
             'time': time.strftime('%Y-%m-%d %H:%M:%S'),
@@ -58,14 +84,55 @@ def _audit(op, repo, detail='', ok=True):
             'repo': repo,
             'detail': str(detail)[:300],
             'ok': bool(ok),
-            'src': request.headers.get('X-Forwarded-For') or request.host or 'local',
+            'src': getattr(request, 'remote_addr', '') or 'local',
         }
+        xff = request.headers.get('X-Forwarded-For')
+        if xff:
+            rec['xff'] = xff[:80]
         line = json.dumps(rec, ensure_ascii=False)
         with _AUDIT_LOCK:
+            _rotate_audit_locked()
             with open(AUDIT_PATH, 'a', encoding='utf-8') as f:
                 f.write(line + '\n')
+        # 标记本次请求已手工记过账，after_request 的自动审计就不再重复写一条
+        _repo_op_local.audited = True
     except Exception:
         pass  # 审计失败不影响操作本身
+
+
+def _audit_request():
+    """after_request 里统一记账：写方法 + /api/ 路径就落审计。
+    op 取路径尾段（repo 级操作形如 push / stash/save），成功与否优先看响应体的 ok。
+    路由里已手工调用过 _audit 的（能写更具体的 detail）不重复记录。"""
+    try:
+        if request.method not in ('POST', 'PUT', 'DELETE', 'PATCH'):
+            return
+        if getattr(_repo_op_local, 'audited', False):
+            return
+        path = request.path or ''
+        if not path.startswith('/api/'):
+            return
+        parts = [p for p in path[len('/api/'):].split('/') if p]
+        if not parts or any(p in _AUDIT_SKIP for p in parts):
+            return
+        if parts[0] in ('repo', 'workspace') and len(parts) >= 3:
+            repo, op = parts[1], '/'.join(parts[2:])
+        else:
+            repo, op = '', '/'.join(parts)
+        status, _headers, payload = request.result or (500, {}, b'')
+        ok, detail = status < 400, ''
+        if isinstance(payload, (bytes, bytearray)):
+            try:
+                body = json.loads(payload.decode('utf-8'))
+                if isinstance(body, dict):
+                    if 'ok' in body:
+                        ok = ok and bool(body['ok'])
+                    detail = body.get('output') or body.get('error') or ''
+            except Exception:
+                pass
+        _audit(op, repo, str(detail).replace('\n', ' ')[:200], ok)
+    except Exception:
+        pass  # 审计绝不打断响应
 
 # ============================================================
 # 资源清理：进程退出时优雅关闭 watchdog/SSE/线程池
@@ -382,6 +449,7 @@ def _acquire_repo_write_lock():
     """同仓库写操作串行化：POST/PUT/DELETE/PATCH 按仓库名加锁。"""
     if request.method not in ('POST', 'PUT', 'DELETE', 'PATCH'):
         return None
+    _repo_op_local.audited = False  # 每次写请求重置，供 after_request 去重
     m = _REPO_WRITE_LOCK_RE.match(request.path or '')
     if not m:
         return None
@@ -408,6 +476,8 @@ def _release_repo_write_lock():
             pass
     _repo_op_local.lock = None
     _repo_op_local.name = None
+    # 统一审计：放在锁释放之后，审计 IO 不占着仓库锁
+    _audit_request()
 
 
 def safe_repo_path(repo_path, rel):
@@ -854,11 +924,12 @@ def api_repo_remove():
 
 @app.route('/api/repo/<name>')
 def api_repo_status(name):
-    """获取单个仓库状态"""
+    """获取单个仓库状态（复用 /api/repos 的短 TTL 缓存，避免每次再跑一遍 git status）"""
     path = REPOS.get(name)
     if not path:
         return jsonify({'error': '仓库不存在'}), 404
-    st = gm.get_status(path)
+    st = _status_map_parallel({name: path}, max_age=_STATUS_CACHE_TTL).get(name)
+    st = dict(st) if st else gm.get_status(path)
     st['name'] = name
     st['path'] = path
     return jsonify(st)
@@ -939,7 +1010,11 @@ def api_search(name):
     keyword = request.args.get('q', '')
     author = request.args.get('author', '')
     since = request.args.get('since', 0, type=int)
-    commits = gm.search_commits(path, keyword, author=author, since_days=since)
+    try:
+        commits = gm.search_commits(path, keyword, author=author, since_days=since)
+    except ValueError as e:
+        # 正则语法错误等用户输入问题 → 400 并说明原因，而不是"搜不到"
+        return jsonify({'error': str(e)}), 400
     return jsonify(commits)
 
 # ============================================================
@@ -1017,6 +1092,11 @@ def api_commit(name):
     message = data.get('message', '')
     auto_stage = data.get('auto_stage', False)  # 自动暂存全部变更
     amend = data.get('amend', False)  # 修正上一次提交（git commit --amend）  # 自动暂存全部变更
+    # 空提交信息直接 400：交给 git 只会得到一段 "Aborting commit due to empty commit
+    # message" 的英文输出，用户不知道是参数没传对（amend 允许不传，沿用原消息）
+    if not str(message or '').strip() and not amend:
+        return jsonify({'ok': False, 'error': '提交信息不能为空',
+                        'output': '提交信息不能为空'}), 400
     if auto_stage:
         out, rc = gm.ws_stage_all_and_commit(path, message, amend=amend)
     else:
@@ -1497,7 +1577,13 @@ def api_search_enhanced(name):
     
     if keyword:
         if regex:
-            args.extend(['--grep', keyword, '--perl-regexp', '-i'])
+            # --perl-regexp 必须在 --grep 之前：它只影响其后的 --grep
+            try:
+                import re as _re
+                _re.compile(keyword)
+            except _re.error as e:
+                return jsonify({'error': f'正则表达式有误: {e}'}), 400
+            args.extend(['--perl-regexp', '--grep', keyword, '-i'])
         else:
             args.extend(['--grep', keyword, '-i'])
     
@@ -1549,11 +1635,12 @@ def api_pull(name):
         return jsonify({'error': '仓库不存在'}), 404
     # rebase=true 时用 pull --rebase（避免产生多余的 merge 提交）
     data = request.json or {}
+    t = gm.net_timeout()
     if data.get('rebase'):
-        out, rc = gm.git(path, 'pull', '--rebase', timeout=90)
+        out, rc = gm.git(path, 'pull', '--rebase', timeout=t)
     else:
         out, rc = gm.repo_pull(path)
-    return jsonify({'ok': rc == 0, 'output': out})
+    return jsonify({'ok': rc == 0, 'output': gm._net_out(out, rc, t)})
 
 @app.route('/api/repo/<name>/push', methods=['POST'])
 def api_push(name):
@@ -1926,6 +2013,7 @@ def api_config():
     """获取配置（含前端需要的分组/模板/通知规则/草稿组/AI 设置）"""
     return jsonify({
         'refresh_interval': CFG.get('refresh_interval', 30),
+        'net_timeout': CFG.get('net_timeout', 120),
         'theme': CFG.get('theme', 'light'),
         'groups': CFG.get('groups', {}),
         'commit_templates': CFG.get('commit_templates', []),
@@ -1943,6 +2031,9 @@ def api_update_config():
     if 'refresh_interval' in data:
         CFG['refresh_interval'] = max(5, int(data['refresh_interval']))
         REFRESH_INTERVAL = CFG['refresh_interval']
+    if 'net_timeout' in data:
+        # 网络命令超时（fetch/pull/push）：10~1800s，防止误填成 0 或超大值
+        CFG['net_timeout'] = max(10, min(int(data['net_timeout']), 1800))
     if 'theme' in data:
         CFG['theme'] = data['theme']
     if 'repos' in data and isinstance(data['repos'], dict):

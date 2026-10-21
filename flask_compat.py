@@ -18,6 +18,8 @@ import json
 import os
 import re
 import threading
+import time
+from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
@@ -36,6 +38,17 @@ class HTTPException(Exception):
         self.code = code
         self.description = description or 'Error'
         self.name = name or 'Error'
+
+
+# 统一安全响应头（所有响应都带）。frame-ancestors / X-Frame-Options 用于挡点击劫持：
+# 本工具的 CSRF 防线依赖「跨站请求带不上自定义头」，但被 iframe 嵌入后请求由页面
+# 自己发出、头是齐的，不挡 iframe 等于绕过 CSRF 防护。
+SECURITY_HEADERS = {
+    'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+}
 
 
 class Response:
@@ -105,26 +118,36 @@ class _Request:
         return getattr(cls._local, 'req', None)
 
     # ---- 代理属性（直接把 _Request 当 Flask 的 request 用） ----
-    def __init__(self, method, path, query, headers, body, host):
+    def __init__(self, method, path, query, headers, body, host, remote=''):
         self.method = method
         self.path = path
         self.args = _Args(parse_qs(query, keep_blank_values=True))
         self.headers = headers
         self.body = body
         self.host = host
+        # 真实 TCP 对端地址（不受 X-Forwarded-For 影响，审计日志用它）
+        self.remote_addr = remote or ''
         self._json_cache = ...
+        self.result = None  # (status, headers, payload)，由 dispatch 的 emit 填充
 
     @property
     def json(self):
-        """Flask 语义：空 body 视为 {}（方便 data.get 写法）；坏 JSON 抛 400"""
+        """Flask 语义：空 body 视为 {}（方便 data.get 写法）；坏 JSON 抛 400。
+        顶层必须是对象：`null` / `[1,2]` / `"abc"` 一律 400 —— 否则下游 data.get()
+        抛 AttributeError，前端只能看到 500 和 Python 异常原文。"""
         if self._json_cache is ...:
             if not self.body:
                 self._json_cache = {}
             else:
                 try:
-                    self._json_cache = json.loads(self.body.decode('utf-8'))
+                    parsed = json.loads(self.body.decode('utf-8'))
                 except Exception:
                     raise HTTPException(400, 'JSON 请求体解析失败')
+                if parsed is None:
+                    parsed = {}
+                elif not isinstance(parsed, dict):
+                    raise HTTPException(400, 'JSON 请求体必须是对象（{...}）')
+                self._json_cache = parsed
         return self._json_cache
 
     def get_json(self, silent=False, force=False):
@@ -186,9 +209,24 @@ def send_from_directory(directory, path):
         '.gif': 'image/gif', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
         '.woff': 'font/woff', '.woff2': 'font/woff2', '.map': 'application/json',
     }.get(ext, 'application/octet-stream')
+    # 静态资源带 ETag / Last-Modified：首页 286 KB，每次打开全量重传太浪费。
+    # mtime+size 足够区分版本（文件改了必然变），命中直接 304 空体。
+    try:
+        st = os.stat(full)
+        etag = 'W/"%x-%x"' % (int(st.st_mtime), st.st_size)
+        cache_hdrs = {
+            'ETag': etag,
+            'Last-Modified': formatdate(st.st_mtime, usegmt=True),
+            'Cache-Control': 'no-cache',
+        }
+        if (request.headers.get('If-None-Match') or '') == etag:
+            return Response(b'', status=304, headers=cache_hdrs)
+    except (OSError, RuntimeError, AttributeError):
+        # 非请求上下文（如 GUI 直接调用）或 stat 失败：退化为普通响应
+        cache_hdrs = {}
     with open(full, 'rb') as f:
         data = f.read()
-    return Response(data, mimetype=ctype)
+    return Response(data, mimetype=ctype, headers=cache_hdrs)
 
 
 class _Rule:
@@ -271,17 +309,25 @@ class Flask:
             return jsonify({'error': exc.description}), exc.code
         return jsonify({'error': 'Internal Server Error'}), 500
 
-    def dispatch(self, method, path, query, headers, body, host):
+    def dispatch(self, method, path, query, headers, body, host, remote=''):
         """返回 (status, headers_dict, payload)。
         payload 为 bytes（普通响应）或迭代器（SSE 流式响应）"""
-        req = _Request(method, path, query, headers, body, host)
+        req = _Request(method, path, query, headers, body, host, remote)
         _Request._bind(req)
+
+        def emit(rv):
+            """统一出口：记录本次响应（status/payload），供 after_request 的
+            审计钩子判断这次写操作成功与否，避免每条路由都手工传 rc。"""
+            result = self._resp(self._normalize(rv))
+            req.result = result
+            return result
+
         try:
             # 1) before_request（CSRF/Host 校验等；返回非 None 即短路）
             for fn in self._before:
                 rv = fn()
                 if rv is not None:
-                    return self._resp(self._normalize(rv))
+                    return emit(rv)
             # 2) 路由匹配（静态部分多者优先，等权保持注册顺序）
             match_path = path
             if len(match_path) > 1 and match_path.endswith('/'):
@@ -295,14 +341,14 @@ class Flask:
                 try:
                     rv = rule.func(**m.groupdict())
                 except HTTPException as e:
-                    return self._resp(self._normalize(self._run_error_handler(e)))
+                    return emit(self._run_error_handler(e))
                 except Exception as e:
-                    return self._resp(self._normalize(self._run_error_handler(e)))
-                return self._resp(self._normalize(rv))
-            return self._resp(self._normalize(self._run_error_handler(
-                HTTPException(404, '接口不存在' if path.startswith('/api/') else 'Not Found'))))
+                    return emit(self._run_error_handler(e))
+                return emit(rv)
+            return emit(self._run_error_handler(
+                HTTPException(404, '接口不存在' if path.startswith('/api/') else 'Not Found')))
         finally:
-            # after_request：释放仓库写锁、失效状态缓存等（before_request 短路时也要跑）
+            # after_request：释放仓库写锁、失效状态缓存、写审计等（短路时也要跑）
             for fn in self._after:
                 try:
                     fn()
@@ -313,6 +359,9 @@ class Flask:
     @staticmethod
     def _resp(response):
         headers = dict(response.headers)
+        # 统一安全响应头：普通响应、静态文件、错误页、SSE 全覆盖
+        for k, v in SECURITY_HEADERS.items():
+            headers.setdefault(k, v)
         if response.stream is not None:
             headers['Transfer-Encoding'] = 'chunked'
             headers.setdefault('Cache-Control', 'no-cache')
@@ -346,6 +395,8 @@ class Flask:
                     self.send_response(413)
                     self.send_header('Content-Type', 'application/json; charset=utf-8')
                     self.send_header('Content-Length', '0')
+                    for k, v in SECURITY_HEADERS.items():
+                        self.send_header(k, v)
                     self.end_headers()
                     self.close_connection = True
                     return
@@ -354,7 +405,8 @@ class Flask:
                 host_hdr = self.headers.get('Host', '')
                 try:
                     status, hdrs, payload = app.dispatch(self.command, unquote(parsed.path),
-                                                         parsed.query, headers, body, host_hdr)
+                                                         parsed.query, headers, body, host_hdr,
+                                                         remote=self.client_address[0])
                 except Exception:
                     status, hdrs, payload = 500, {'Content-Type': _JSON_CT}, \
                         b'{"error": "Internal Server Error"}'
