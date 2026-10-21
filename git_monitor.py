@@ -2408,12 +2408,16 @@ def terminal_launch_cmd(repo_path, platform=None):
     路径只来自服务端配置（REPOS），不拼接用户输入。返回 (argv, popen_kwargs)。"""
     plat = platform or sys.platform
     if plat.startswith("win"):
-        # ⚠ 不要写成 cmd /c start "整串"：argv 里的整串会被 subprocess.list2cmdline
-        # 再包一层引号并把内嵌引号转义，cmd 二次解析后 "" 会变成 \\，实测弹窗
-        # 「Windows 找不到 '\\' 文件」。CREATE_NEW_CONSOLE 已保证新开窗口，无需 start；
-        # 路径作独立 argv 元素、由 subprocess 按需加引号，/k 让窗口在 cd 后保持打开。
-        return (["cmd", "/k", "cd", "/d", repo_path],
-                {"creationflags": getattr(subprocess, "CREATE_NEW_CONSOLE", 0)})
+        # Windows 两个坑（都实测翻过车，别再"简化"这段）：
+        # 1) 引号坑：把 start "" cmd /k ... 整串作单个 argv，会被 list2cmdline
+        #    再包一层引号并转义，cmd 解析后 "" 变 \\ → 弹窗「找不到 '\\' 文件」。
+        #    所以参数必须逐个 argv 元素传，路径由 subprocess 按需加引号。
+        # 2) 闪退坑：直接 Popen(["cmd","/k",...]) 时，调用方给的 stdin=DEVNULL
+        #    会让 cmd 读到 EOF 立即退出（/k 也拦不住）。必须经 start 启动：
+        #    start 新开的进程用新控制台的键盘作输入，不受服务端重定向句柄影响。
+        # 外层 cmd 只是跑一下 start 就退出，不需要给它单开控制台（会多闪一个空窗）。
+        return (["cmd", "/c", "start", "", "cmd", "/k", "cd", "/d", repo_path], {})
+
     if plat == "darwin":
         return (["open", "-a", "Terminal", repo_path], {})
     # Linux：按优先级找可用的终端模拟器
