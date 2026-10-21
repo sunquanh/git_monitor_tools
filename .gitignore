@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Git 仓库监控器：危险操作审计日志（本地运行产物，含操作记录与来源地址，勿提交）
+git_monitor_audit.jsonl
+git_monitor_audit.jsonl.*
+
+# Git 仓库监控器：配置自动备份（保存设置时生成，含本地仓库真实路径，勿提交）
+git_monitor.json.bak

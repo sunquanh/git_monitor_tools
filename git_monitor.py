@@ -2384,8 +2384,12 @@ def build_discard_confirm_text(files, limit=8):
 
 
 def ws_commit(repo_path, message, amend=False):
-    """提交已暂存内容；amend=True 时修正上一次提交（git commit --amend，不产生新提交）。"""
+    """提交已暂存内容；amend=True 时修正上一次提交（git commit --amend，不产生新提交）。
+    amend 且 message 为空时用 --no-edit 沿用原提交信息：传 -m "" 会被 git 以
+    "Aborting commit due to empty commit message" 拒绝（且调用方已暂存的内容会悬空）。"""
     if amend:
+        if not str(message or "").strip():
+            return git(repo_path, "commit", "--amend", "--no-edit")
         return git(repo_path, "commit", "--amend", "-m", message)
     return git(repo_path, "commit", "-m", message)
 

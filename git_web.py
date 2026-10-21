@@ -1091,7 +1091,7 @@ def api_commit(name):
     data = request.json
     message = data.get('message', '')
     auto_stage = data.get('auto_stage', False)  # 自动暂存全部变更
-    amend = data.get('amend', False)  # 修正上一次提交（git commit --amend）  # 自动暂存全部变更
+    amend = data.get('amend', False)  # 修正上一次提交（git commit --amend）
     # 空提交信息直接 400：交给 git 只会得到一段 "Aborting commit due to empty commit
     # message" 的英文输出，用户不知道是参数没传对（amend 允许不传，沿用原消息）
     if not str(message or '').strip() and not amend:

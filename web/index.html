@@ -787,6 +787,15 @@ a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,te
         </div>
       </div>
 
+      <div class="setSec setSecGeneral" style="margin-bottom:20px">
+        <label style="display:block;margin-bottom:8px;font-weight:600;color:var(--text2)">网络命令超时（秒）</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <input type="number" id="netTimeout" min="10" max="1800" value="120" class="field-input-bg" style="width:100px">
+          <button class="btn btn-primary" onclick="saveNetTimeout()">保存</button>
+          <span style="font-size:12px;color:var(--text3)">范围: 10-1800秒（fetch / pull / push 用）</span>
+        </div>
+      </div>
+
       <div class="setSec setSecRepos" style="margin-bottom:20px">
         <label style="display:block;margin-bottom:8px;font-weight:600;color:var(--text2)">仓库管理</label>
         <div id="repoMgrList" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px"></div>
@@ -3873,6 +3882,7 @@ async function loadConfig(opts) {
   window._cfg = cfg;  // 供分组视图/草稿组/模板下拉等消费
   $('refreshInterval').value = cfg.refresh_interval || 30;
   $('currentInterval').textContent = cfg.refresh_interval || 30;
+  $('netTimeout').value = cfg.net_timeout || 120;
   if (!opts || opts.applyTheme !== false) applyThemeUI(cfg.theme);
   startAutoTimer(cfg.refresh_interval || 30);
   // 提交模板：后端 commit_templates 优先，拼接到内置前缀之后。
@@ -3905,6 +3915,18 @@ async function saveRefreshInterval() {
     toast('设置已保存');
     $('currentInterval').textContent = interval;
     startAutoTimer(interval);
+  }
+}
+async function saveNetTimeout() {
+  const t = parseInt($('netTimeout').value) || 120;
+  if (t < 10 || t > 1800) {
+    toast('网络超时必须在 10-1800 秒之间', 'error');
+    return;
+  }
+  const r = await api('/api/config', {method:'POST', body:{net_timeout: t}});
+  if (r && r.ok) {
+    toast('设置已保存');
+    if (window._cfg) window._cfg.net_timeout = t;
   }
 }
 async function setTheme(theme) {
