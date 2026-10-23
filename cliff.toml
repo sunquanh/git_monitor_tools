@@ -1,0 +1,55 @@
+# git-cliff 配置：按提交历史自动生成 CHANGELOG.md
+# 用法（在仓库根目录）：
+#   发版：git cliff --tag vX.Y.Z -o CHANGELOG.md
+#   预览未发布变更：git cliff --unreleased
+# 提交标题规范见 Web 端的 Conventional Commits 结构化输入；历史中文标题
+# （新增：/修复/优化 等）也已在下面的解析规则里兼容。
+
+[changelog]
+header = """
+# 变更日志
+
+本文件由 git-cliff 依据提交历史自动生成（配置见仓库根目录 cliff.toml），请勿手工编辑。
+
+"""
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [未发布]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | upper_first | trim }}
+{% endfor %}
+{% endfor %}
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = false
+filter_unconventional = false
+filter_commits = false
+sort_commits = "newest"
+commit_preprocessors = [
+  # 去掉 Conventional Commits 的英文前缀（feat:/fix(scope): 等），只留正文
+  { pattern = '^[a-zA-Z]+(\([a-zA-Z0-9_-]+\))?!?:\s*', replace = "" },
+]
+commit_parsers = [
+  { message = "^Merge", skip = true },
+  { message = "^feat", group = "✨ 新功能" },
+  { message = "^新增", group = "✨ 新功能" },
+  { message = "^fix", group = "🐛 问题修复" },
+  { message = "^修复", group = "🐛 问题修复" },
+  { message = "^再修", group = "🐛 问题修复" },
+  { message = "手册|说明", group = "📚 文档" },
+  { message = "^docs", group = "📚 文档" },
+  { message = "^优化", group = "🚀 优化改进" },
+  { message = "^UI", group = "🚀 优化改进" },
+  { message = "^perf", group = "🚀 优化改进" },
+  { message = "^refactor", group = "♻️ 重构" },
+  { message = "^删除", group = "🧹 清理" },
+  { message = ".*", group = "📦 其他变更" },
+]

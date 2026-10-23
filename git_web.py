@@ -2081,6 +2081,7 @@ def api_config():
     """获取配置（含前端需要的分组/模板/通知规则/草稿组/AI 设置）"""
     return jsonify({
         'refresh_interval': CFG.get('refresh_interval', 30),
+        'app_version': gm.APP_VERSION,
         'net_timeout': CFG.get('net_timeout', 120),
         'exit_on_page_close': CFG.get('exit_on_page_close', True),
         'theme': CFG.get('theme', 'light'),

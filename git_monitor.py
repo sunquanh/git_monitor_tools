@@ -155,6 +155,9 @@ if getattr(sys, "frozen", False):
 else:
     _BASE = os.path.dirname(os.path.abspath(__file__))
 
+# 应用版本号（单一来源：桌面端标题徽章与 Web 接口 /api/config 的 app_version 都取这里，改版本只改这一处）
+APP_VERSION = "3.2.3"
+
 CONFIG_PATH = os.path.join(_BASE, "git_monitor.json")
 
 # interactive rebase 允许的动作白名单（todo 文件里的合法指令子集）
@@ -3415,7 +3418,7 @@ class GitMonitorApp:
         header.create_text(tx, sub_y, text="实时状态 · 上线前差异比对 · 离线可用", anchor="w",
                            fill=THEME_HEADER_SUB, font=(FONT_UI, 9))
         # 版本徽章
-        v3 = header.create_text(3800, title_y, text="v3.2.3", anchor="e",
+        v3 = header.create_text(3800, title_y, text="v" + APP_VERSION, anchor="e",
                                 fill="white", font=(FONT_UI, 9, "bold"))
         header.bind("<Configure>", lambda e, tag=v3: header.coords(tag, e.width - 20, title_y))
 

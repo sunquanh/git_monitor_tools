@@ -452,7 +452,7 @@ a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,te
     <div class="title">Git 仓库监控器</div>
     <div class="subtitle">实时状态 · 上线前差异比对 · 离线可用</div>
   </div>
-  <span class="version">v3.2.3</span>
+  <span class="version" id="appVersion"></span>
   <div class="theme-btn" onclick="toggleNotify()" id="notifyBtn" title="新提交桌面通知" style="opacity:.5">🔔</div>
   <div class="theme-btn" onclick="openSettings()" title="设置">⚙</div>
   <div class="theme-btn" onclick="toggleThemeWithPreview(event)" id="themeBtn" title="主题选择">🎨</div>
@@ -3897,6 +3897,7 @@ async function loadConfig(opts) {
   const cfg = await api('/api/config');
   if (!cfg) return;
   window._cfg = cfg;  // 供分组视图/草稿组/模板下拉等消费
+  if (cfg.app_version) $('appVersion').textContent = 'v' + cfg.app_version;  // 版本号单一来源：后端 git_monitor.APP_VERSION
   $('refreshInterval').value = cfg.refresh_interval || 30;
   $('currentInterval').textContent = cfg.refresh_interval || 30;
   $('netTimeout').value = cfg.net_timeout || 120;

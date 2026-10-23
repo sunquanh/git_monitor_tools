@@ -1,0 +1,167 @@
+{
+ "/": {
+  "sig": {
+   "$": "text/html"
+  },
+  "status": 200
+ },
+ "/api/app-health": {
+  "sig": {
+   "git_monitor_review.ahead": "int",
+   "git_monitor_review.behind": "int",
+   "git_monitor_review.branch": "str",
+   "git_monitor_review.score": "int",
+   "git_monitor_review.uncommitted": "int"
+  },
+  "status": 200
+ },
+ "/api/config": {
+  "sig": {
+   "ai_model": "str",
+   "app_version": "str",
+   "commit_templates": "list",
+   "draft_groups": "dict",
+   "exit_on_page_close": "bool",
+   "groups.默认[]": "str",
+   "net_timeout": "int",
+   "notify_repos": "list",
+   "refresh_interval": "int",
+   "theme": "str"
+  },
+  "status": 200
+ },
+ "/api/dora": {
+  "sig": {
+   "$": "dict"
+  },
+  "status": 200
+ },
+ "/api/repo/git_monitor_review": {
+  "sig": {
+   "added": "int",
+   "ahead": "int",
+   "behind": "int",
+   "branch": "str",
+   "health": "int",
+   "invalid": "bool",
+   "last_author": "str",
+   "last_commit": "str",
+   "last_date": "str",
+   "last_hash": "str",
+   "name": "str",
+   "path": "str",
+   "removed": "int",
+   "uncommitted": "int"
+  },
+  "status": 200
+ },
+ "/api/repo/git_monitor_review/branches": {
+  "sig": {
+   "local[]": "str",
+   "overview[].ahead": "int",
+   "overview[].behind": "int",
+   "overview[].date": "str",
+   "overview[].hash7": "str",
+   "overview[].kind": "str",
+   "overview[].name": "str",
+   "overview[].subject": "str",
+   "overview[].ts": "int",
+   "remote[]": "str"
+  },
+  "status": 200
+ },
+ "/api/repo/git_monitor_review/commits": {
+  "sig": {
+   "[].author": "str",
+   "[].date": "str",
+   "[].hash": "str",
+   "[].hash7": "str",
+   "[].message": "str",
+   "[].ts": "int"
+  },
+  "status": 200
+ },
+ "/api/repo/git_monitor_review/graph": {
+  "sig": {
+   "commits[].author": "str",
+   "commits[].date": "str",
+   "commits[].hash": "str",
+   "commits[].message": "str",
+   "commits[].parents[]": "str",
+   "commits[].ts": "int",
+   "ref_map.35bf2f1c7c80228b2c781751012ca5cbc5c0e455[].kind": "str",
+   "ref_map.35bf2f1c7c80228b2c781751012ca5cbc5c0e455[].name": "str",
+   "ref_map.df83ba5b5627b54a54611b2bf8149c17caba6b0f[].kind": "str",
+   "ref_map.df83ba5b5627b54a54611b2bf8149c17caba6b0f[].name": "str",
+   "rows[].hash": "str",
+   "rows[].lane": "int"
+  },
+  "status": 200
+ },
+ "/api/repo/git_monitor_review/stash": {
+  "sig": {
+   "$": "list"
+  },
+  "status": 200
+ },
+ "/api/repo/git_monitor_review/tags": {
+  "sig": {
+   "$": "list"
+  },
+  "status": 200
+ },
+ "/api/repos": {
+  "sig": {
+   "git_monitor_review.added": "int",
+   "git_monitor_review.ahead": "int",
+   "git_monitor_review.behind": "int",
+   "git_monitor_review.branch": "str",
+   "git_monitor_review.health": "int",
+   "git_monitor_review.invalid": "bool",
+   "git_monitor_review.last_author": "str",
+   "git_monitor_review.last_commit": "str",
+   "git_monitor_review.last_date": "str",
+   "git_monitor_review.last_hash": "str",
+   "git_monitor_review.name": "str",
+   "git_monitor_review.path": "str",
+   "git_monitor_review.removed": "int",
+   "git_monitor_review.uncommitted": "int"
+  },
+  "status": 200
+ },
+ "/api/stats": {
+  "sig": {
+   "by_author.加菲猫": "int",
+   "by_date.2026-10-19": "int",
+   "by_date.2026-10-21": "int",
+   "by_repo_author.git_monitor_review.加菲猫": "int",
+   "by_repo_date.git_monitor_review.2026-10-19": "int",
+   "by_repo_date.git_monitor_review.2026-10-21": "int",
+   "by_repo_type.git_monitor_review.other": "int",
+   "by_type.other": "int"
+  },
+  "status": 200
+ },
+ "/api/weekly": {
+  "sig": {
+   "filename": "str",
+   "md": "str",
+   "n_commits": "int"
+  },
+  "status": 200
+ },
+ "/api/workspace/git_monitor_review": {
+  "sig": {
+   "[].added": "int",
+   "[].conflict": "bool",
+   "[].path": "str",
+   "[].removed": "int",
+   "[].staged": "bool",
+   "[].status": "str",
+   "[].status_cn": "str",
+   "[].unstaged": "bool",
+   "[].untracked": "bool"
+  },
+  "status": 200
+ }
+}

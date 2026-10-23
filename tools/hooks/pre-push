@@ -1,0 +1,40 @@
+#!/bin/sh
+# 推送前自检：Python 语法编译 + API 冒烟（借鉴 Sphinx 的“push 前先过一关”）。
+#
+# 安装（二选一）：
+#   1) 复制本文件到仓库的 .git/hooks/pre-push
+#   2) 在仓库根目录执行：git config core.hooksPath tools/hooks
+# 说明：Web 服务在运行时才做 API 冒烟；服务没启动就只做语法检查，不阻断推送。
+# 若钩子不生效，确认本文件有执行权限（chmod +x tools/hooks/pre-push）。
+
+ROOT=$(git rev-parse --show-toplevel)
+PY=$(command -v python3 || command -v python)
+if [ -z "$PY" ]; then
+  echo "[pre-push] 找不到 python，跳过自检"
+  exit 0
+fi
+
+if ! "$PY" -m py_compile "$ROOT/git_monitor.py" "$ROOT/git_web.py"; then
+  echo "[pre-push] Python 语法检查未通过，已阻断推送"
+  exit 1
+fi
+
+if "$PY" - "$ROOT" <<'PYEOF'
+import urllib.request, sys
+try:
+    urllib.request.urlopen("http://127.0.0.1:8420/api/app-health", timeout=3)
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+PYEOF
+then
+  if ! "$PY" "$ROOT/tools/api_smoke.py"; then
+    echo "[pre-push] API 冒烟未通过，已阻断推送（确认是预期变更就先跑 api_smoke.py --init 更新快照）"
+    exit 1
+  fi
+else
+  echo "[pre-push] Web 服务未运行，跳过 API 冒烟（只做了语法检查）"
+fi
+
+echo "[pre-push] 自检通过"
+exit 0
