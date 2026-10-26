@@ -1,10 +1,11 @@
 #!/bin/sh
-# 推送前自检：Python 语法编译 + API 冒烟（借鉴 Sphinx 的“push 前先过一关”）。
+# 推送前自检：Python 语法编译 + 待推送内容扫描 + API 冒烟（借鉴 Sphinx 的“push 前先过一关”）。
 #
 # 安装（二选一）：
 #   1) 复制本文件到仓库的 .git/hooks/pre-push
 #   2) 在仓库根目录执行：git config core.hooksPath tools/hooks
-# 说明：Web 服务在运行时才做 API 冒烟；服务没启动就只做语法检查，不阻断推送。
+# 说明：Web 服务在运行时才做 API 冒烟；服务没启动就只做语法检查与内容扫描，不阻断推送。
+# 扫描发现密钥或本机绝对路径会阻断推送；确认是误报可用 git push --no-verify 跳过。
 # 若钩子不生效，确认本文件有执行权限（chmod +x tools/hooks/pre-push）。
 
 ROOT=$(git rev-parse --show-toplevel)
@@ -16,6 +17,12 @@ fi
 
 if ! "$PY" -m py_compile "$ROOT/git_monitor.py" "$ROOT/git_web.py"; then
   echo "[pre-push] Python 语法检查未通过，已阻断推送"
+  exit 1
+fi
+
+# 推送前扫描：待推送 diff 新增行里的密钥与本机绝对路径（与网页端推送扫描同一规则）
+if ! "$PY" "$ROOT/tools/push_scan.py" "$ROOT"; then
+  echo "[pre-push] 推送扫描未通过，已阻断推送（确认是误报可用 git push --no-verify 跳过）"
   exit 1
 fi
 

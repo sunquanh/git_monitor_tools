@@ -159,6 +159,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);height:100vh
 .diff-line.del{background:rgba(239,68,68,0.08);color:var(--red2)}
 .diff-line.hunk{background:rgba(139,92,246,0.08);color:var(--purple);font-weight:600}
 .diff-line.meta{color:var(--text3)}
+.diff-line .wd-del{background:rgba(239,68,68,.28);border-radius:2px;padding:0 1px}
+.diff-line .wd-add{background:rgba(16,185,129,.32);border-radius:2px;padding:0 1px}
+.sbs-cell .wd-del{background:rgba(239,68,68,.28);border-radius:2px;padding:0 1px}
+.sbs-cell .wd-add{background:rgba(16,185,129,.32);border-radius:2px;padding:0 1px}
 
 /* Workspace */
 .ws-toolbar{display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
@@ -551,6 +555,11 @@ a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,te
       <button class="btn btn-sm" onclick="showBlame()">🔍 Blame</button>
       <button class="btn btn-sm" onclick="showFileHistory()">📜 文件历史</button>
       <button class="btn btn-sm btn-danger" onclick="discardAll()">⚠ 放弃所有</button>
+    </div>
+    <div class="ws-notes" style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-bottom:1px solid var(--border)">
+      <span style="font-size:12px;color:var(--text3);padding-top:6px;white-space:nowrap">📝 备注</span>
+      <textarea id="wsNotes" rows="2" placeholder="仓库备注：用途、注意事项、部署说明…（只存本地配置，不进仓库）" style="flex:1;resize:vertical;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px"></textarea>
+      <button class="btn btn-sm" onclick="saveWsNotes()" style="margin-top:4px">💾 保存</button>
     </div>
     <div class="panel-split" style="flex:1">
       <div class="panel-left">
@@ -2253,12 +2262,32 @@ document.addEventListener('keydown', (e) => {
 const DIFF_MAX_LINES = 8000;
 let _lastDetail = '';
 let _diffMode = 'unified';   // unified | sbs（并排）
+// 词级 diff：把新旧行切成 token（ASCII 词、单个汉字、单个标点、空白段），LCS 配对后给改动词着色。
+// token 超过上限时返回 null（退回整行着色，避免大行 O(n²) 卡顿）。
+function wordDiffHtml(oldText, newText) {
+  const tok = s => (s.match(/[A-Za-z0-9_]+|[\u4e00-\u9fff]|[^\w\s\u4e00-\u9fff]|\s+/g) || []);
+  const a = tok(oldText), b = tok(newText);
+  if (a.length > 300 || b.length > 300) return null;
+  const dp = Array.from({length: a.length + 1}, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  let i = 0, j = 0, oh = '', nh = '';
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { oh += esc(a[i]); nh += esc(b[j]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { oh += `<span class="wd-del">${esc(a[i])}</span>`; i++; }
+    else { nh += `<span class="wd-add">${esc(b[j])}</span>`; j++; }
+  }
+  while (i < a.length) { oh += `<span class="wd-del">${esc(a[i])}</span>`; i++; }
+  while (j < b.length) { nh += `<span class="wd-add">${esc(b[j])}</span>`; j++; }
+  return {oldHtml: oh, newHtml: nh};
+}
 function diffLinesHtml(text) {
   const lines = String(text || '').split('\n');
   const shown = Math.min(lines.length, DIFF_MAX_LINES);
-  let html = '';
   // 行号：从 @@ -a,b +c,d @@ 里取起始行，后续按 add/del/context 各自递增
   let oldNo = 0, newNo = 0;
+  const rows = [];
   for (let i = 0; i < shown; i++) {
     const line = lines[i];
     let cls = '', o = '', n = '';
@@ -2279,7 +2308,25 @@ function diffLinesHtml(text) {
       o = oldNo++;
       n = newNo++;
     }
-    html += `<div class="diff-line ${cls}"><span class="ln">${o}</span><span class="ln">${n}</span><span class="lc">${esc(line) || ' '}</span></div>`;
+    rows.push({cls, o, n, line, contentHtml: null});
+  }
+  // 词级高亮：删除块后紧跟新增块时按序配对（git diff 的常规排列）
+  for (let i = 0; i < rows.length;) {
+    if (rows[i].cls !== 'del') { i++; continue; }
+    let j = i;
+    while (j < rows.length && rows[j].cls === 'del') j++;
+    let k = j;
+    while (k < rows.length && rows[k].cls === 'add') k++;
+    const pairs = Math.min(j - i, k - j);
+    for (let p = 0; p < pairs; p++) {
+      const wd = wordDiffHtml(rows[i + p].line.slice(1), rows[j + p].line.slice(1));
+      if (wd) { rows[i + p].contentHtml = '-' + wd.oldHtml; rows[j + p].contentHtml = '+' + wd.newHtml; }
+    }
+    i = k;
+  }
+  let html = '';
+  for (const r of rows) {
+    html += `<div class="diff-line ${r.cls}"><span class="ln">${r.o}</span><span class="ln">${r.n}</span><span class="lc">${r.contentHtml !== null ? r.contentHtml : (esc(r.line) || ' ')}</span></div>`;
   }
   if (lines.length > DIFF_MAX_LINES) {
     html += `<div class="diff-line meta" style="padding:10px;text-align:center">⚠ 差异过大，仅显示前 ${DIFF_MAX_LINES} 行（共 ${lines.length} 行）</div>`;
@@ -2304,13 +2351,21 @@ function sbsHtml(text) {
   // 旧版用 sbs-l/sbs-r 同时表示"左右列"和"增删"，导致上下文行整列被染色
   const escCell = (type, n, t, mark) =>
     `<div class="sbs-cell ${type}"><span class="ln">${n ?? ''}</span><span class="mark">${mark || ''}</span><span>${esc(t == null ? '' : t)}</span></div>`;
+  // 已做词级高亮的内容不再二次转义
+  const escCellHtml = (type, n, html, mark) =>
+    `<div class="sbs-cell ${type}"><span class="ln">${n ?? ''}</span><span class="mark">${mark || ''}</span><span>${html == null ? '' : html}</span></div>`;
   const flush = () => {
     const n = Math.max(dels.length, adds.length);
     for (let k = 0; k < n; k++) {
       const d = dels[k], a = adds[k];
+      let dHtml = null, aHtml = null;
+      if (d && a) {
+        const wd = wordDiffHtml(d.t, a.t);
+        if (wd) { dHtml = wd.oldHtml; aHtml = wd.newHtml; }
+      }
       html += `<div class="sbs-row">` +
-        (d ? escCell('del', d.n, d.t, '−') : escCell('empty', null, null, '')) +
-        (a ? escCell('add', a.n, a.t, '+') : escCell('empty', null, null, '')) +
+        (d ? escCellHtml('del', d.n, dHtml !== null ? dHtml : esc(d.t), '−') : escCell('empty', null, null, '')) +
+        (a ? escCellHtml('add', a.n, aHtml !== null ? aHtml : esc(a.t), '+') : escCell('empty', null, null, '')) +
         `</div>`;
     }
     dels = []; adds = [];
@@ -2527,6 +2582,23 @@ async function loadWorkspace() {
   if (!files) return;
   wsFiles = files;
   renderWorkspace();
+  loadWsNotes();
+}
+async function loadWsNotes() {
+  const name = $('wsRepoSelect').value;
+  const ta = $('wsNotes');
+  if (!name || !ta) return;
+  if (document.activeElement === ta) return; // 正在输入时不覆盖
+  const r = await api(`/api/repo/${name}/notes`);
+  if (r && typeof r.notes === 'string') ta.value = r.notes;
+}
+async function saveWsNotes() {
+  const name = $('wsRepoSelect').value;
+  const ta = $('wsNotes');
+  if (!name || !ta) return;
+  const r = await api(`/api/repo/${name}/notes`, {method:'POST', body:{notes: ta.value}});
+  if (r && r.ok) toast('备注已保存 ✅');
+  else toast('备注保存失败: ' + (r?.error || ''), 'error');
 }
 function renderWorkspace() {
   const st = wsFiles.map((f, i) => f.staged ? i : -1).filter(i => i >= 0);
@@ -2710,7 +2782,7 @@ async function renderImageDiffPreview(path) {
       ${_imgHtml('new', data?.new?.b64, data?.mime, data?.new ? data.new.exists : false, data?.new?.error, '新版本')}
     </div>`;
 }
-function diffLineHtml(line, num, selectable) {
+function diffLineHtml(line, num, selectable, contentHtml) {
   let cls = '';
   if (line.startsWith('+') && !line.startsWith('+++')) cls = 'add';
   else if (line.startsWith('-') && !line.startsWith('---')) cls = 'del';
@@ -2720,7 +2792,7 @@ function diffLineHtml(line, num, selectable) {
   // 1-based 物理行号（与后端 patch-lines / build_line_patch 的编号约定一致）
   const cb = (selectable && (cls === 'add' || cls === 'del') && num)
     ? `<input type="checkbox" class="line-cb" data-num="${num}" title="勾选后可只暂存这些行">` : '';
-  return `<div class="diff-line ${cls}">${cb}${esc(line)}</div>`;
+  return `<div class="diff-line ${cls}">${cb}${contentHtml != null ? contentHtml : esc(line)}</div>`;
 }
 async function previewFile(path, untracked, staged) {
   const name = $('wsRepoSelect').value;
@@ -2767,7 +2839,22 @@ function renderDiffPreview(diffText, path) {
           (canLine ? ` <button class="btn btn-sm" onclick="selectBlockLines(${i})">全选本块行</button>` : '');
       html += `<div class="hunk-bar"><span style="font-size:11px;color:var(--text3)">变更块 ${i + 1}/${hunks.length}</span>` + btn + `</div>`;
     }
-    html += hl.map(l => { const {l: x, n} = numLine(l); return diffLineHtml(x, n, canLine); }).join('') + '</div>';
+    // 词级高亮：块内删除行后紧跟新增行时按序配对（行号与复选框编号不受影响）
+    const hlWord = new Array(hl.length).fill(null);
+    for (let p = 0; p < hl.length;) {
+      if (!(hl[p].startsWith('-') && !hl[p].startsWith('---'))) { p++; continue; }
+      let j = p;
+      while (j < hl.length && hl[j].startsWith('-') && !hl[j].startsWith('---')) j++;
+      let k = j;
+      while (k < hl.length && hl[k].startsWith('+') && !hl[k].startsWith('+++')) k++;
+      const pairs = Math.min(j - p, k - j);
+      for (let q = 0; q < pairs; q++) {
+        const wd = wordDiffHtml(hl[p + q].slice(1), hl[j + q].slice(1));
+        if (wd) { hlWord[p + q] = '-' + wd.oldHtml; hlWord[j + q] = '+' + wd.newHtml; }
+      }
+      p = k;
+    }
+    html += hl.map((l, li) => { const {l: x, n} = numLine(l); return diffLineHtml(x, n, canLine, hlWord[li]); }).join('') + '</div>';
   });
   if (isImagePath(path)) {
     renderImageDiffPreview(path);
@@ -2833,9 +2920,35 @@ function _wsSetSectionAll(containerId, checked) {
 /* ── 推送（提交栏「⬆ 推送」与「提交后推送」共用）──
    推送被拒（fetch first）时提供「拉取变基 + 重新推送」一键恢复。返回是否成功 */
 async function pushRepo(name) {
+  // 推送预览：先看超前提交与文件清单，确认再推（推前先过一关）
+  const pv = await api(`/api/repo/${name}/push-preview`);
+  if (!pv) { toast('获取推送预览失败', 'error'); return false; }
+  if (pv.has_upstream === false) {
+    if (!await askConfirm(`「${name}」当前分支 ${pv.branch || ''} 未设置上游分支。\n\n直接推送将按 git 默认行为执行（可能需要先设上游），是否继续？`, '推送预览')) return false;
+  } else {
+    if (!pv.ahead) { toast('没有可推送的提交 ✅'); return true; }
+    const fileLines = (pv.files || []).slice(0, 10).map(f => `  ${f.path}  +${f.added} −${f.removed}`).join('\n');
+    const more = (pv.files || []).length > 10 ? `\n  ……等共 ${(pv.files || []).length} 个文件` : '';
+    const commitLines = (pv.commits || []).slice(0, 5).join('\n');
+    if (!await askConfirm(
+      `分支：${pv.branch} → ${pv.upstream}\n待推送：${pv.ahead} 个提交，${(pv.files || []).length} 个文件，+${pv.total_added} −${pv.total_removed}\n${fileLines}${more}` +
+      (commitLines ? `\n最近提交：\n${commitLines}` : ''),
+      '推送预览')) return false;
+  }
+  return await pushRepoExec(name, false);
+}
+async function pushRepoExec(name, skipScan) {
   toast('推送中...', 'info');
-  const r = await api(`/api/repo/${name}/push`, {method:'POST'});
+  const r = await api(`/api/repo/${name}/push`, {method:'POST', body:{skip_scan: skipScan}});
   if (r && r.ok) { toast('推送成功 ✅'); loadWorkspace(); fetchRepos(); return true; }
+  if (r && r.blocked_by_scan) {
+    const list = (r.findings || []).slice(0, 20).map(f => `  ${f.file}:${f.line || ''} [${f.type}] ${f.match || ''}`).join('\n');
+    const more = (r.findings || []).length > 20 ? `\n  ……等共 ${r.findings.length} 条` : '';
+    if (await askConfirm(`推送前扫描发现可疑内容，已阻断推送：\n${list}${more}\n\n请先处理（删密钥、改相对路径），或确认是误报后点「确定」仍要推送。`, '推送扫描')) {
+      return await pushRepoExec(name, true);
+    }
+    return false;
+  }
   const out = r?.output || r?.error || '';
   if (!/rejected|fetch first|non-fast-forward/i.test(out)) { toast('推送失败: ' + out, 'error'); return false; }
   const pull = await askConfirm('推送被拒绝：远程有新提交（fetch first）。\n\n是否现在自动「拉取合并(rebase) + 重新推送」？\n（选取消可稍后手动操作）');
@@ -2844,10 +2957,8 @@ async function pushRepo(name) {
   const pr = await api(`/api/repo/${name}/pull`, {method:'POST', body:{rebase: true}});
   if (!pr || !pr.ok) { toast('拉取失败（可能有冲突）: ' + (pr?.output || pr?.error || ''), 'error'); return false; }
   toast('合并成功，重新推送...', 'info');
-  const pr2 = await api(`/api/repo/${name}/push`, {method:'POST'});
-  if (pr2 && pr2.ok) { toast('推送成功 ✅'); loadWorkspace(); fetchRepos(); return true; }
-  toast('重新推送失败: ' + (pr2?.output || pr2?.error || ''), 'error');
-  return false;
+  // rebase 可能改写待推送内容，重新走一遍推送（含扫描），不再直调 push 接口
+  return await pushRepoExec(name, skipScan);
 }
 async function doPush() {
   const name = $('wsRepoSelect').value;
@@ -4135,6 +4246,8 @@ function ctxAction(action) {
 }
 
 async function repoAction(name, action) {
+  // 推送统一走 pushRepo（预览 + 扫描），右键菜单与工具栏行为一致
+  if (action === 'push') { await pushRepo(name); return; }
   toast(`正在 ${action} ${name}...`, 'info');
   const r = await api(`/api/repo/${name}/${action}`, {method:'POST'});
   if (r && r.ok) toast(`${action} 成功`, 'success');

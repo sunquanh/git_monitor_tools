@@ -1715,8 +1715,49 @@ def api_push(name):
     path = REPOS.get(name)
     if not path:
         return jsonify({'error': '仓库不存在'}), 404
+    data = request.get_json(silent=True) or {}
+    if not data.get('skip_scan'):
+        upstream, branch, findings = gm.scan_outgoing(path)
+        if findings:
+            # 阻断但不强锁：前端展示清单后可由用户显式确认仍要推送（skip_scan）
+            return jsonify({'ok': False, 'blocked_by_scan': True,
+                            'upstream': upstream, 'findings': findings[:50]})
     out, rc = gm.repo_push(path)
     return jsonify({'ok': rc == 0, 'output': out})
+
+
+@app.route('/api/repo/<name>/push-preview', methods=['GET'])
+def api_push_preview(name):
+    path = REPOS.get(name)
+    if not path:
+        return jsonify({'error': '仓库不存在'}), 404
+    return jsonify(gm.push_preview(path))
+
+
+@app.route('/api/repo/<name>/notes', methods=['GET'])
+def api_get_notes(name):
+    if name not in REPOS:
+        return jsonify({'error': '仓库不存在'}), 404
+    notes = (CFG.get('repo_notes') or {}).get(name, '')
+    return jsonify({'notes': notes})
+
+
+@app.route('/api/repo/<name>/notes', methods=['POST'])
+def api_set_notes(name):
+    if name not in REPOS:
+        return jsonify({'error': '仓库不存在'}), 404
+    data = request.get_json(silent=True) or {}
+    text = str(data.get('notes') or '')
+    if len(text) > 2000:
+        return jsonify({'ok': False, 'error': '备注过长（最多 2000 字）'}), 400
+    notes = dict(CFG.get('repo_notes') or {})
+    if text:
+        notes[name] = text
+    else:
+        notes.pop(name, None)
+    CFG['repo_notes'] = notes
+    gm.save_config(CFG)
+    return jsonify({'ok': True})
 
 @app.route('/api/repo/<name>/fetch', methods=['POST'])
 def api_fetch(name):

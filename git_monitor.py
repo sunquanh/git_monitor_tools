@@ -194,6 +194,7 @@ DEFAULT_CONFIG = {
         "auto_fetch": True,
     },
     "presets": [],
+    "repo_notes": {},
 }
 
 
@@ -236,6 +237,7 @@ def load_config():
             cfg.setdefault("repos", {})
             cfg.setdefault("compare", DEFAULT_CONFIG["compare"])
             cfg.setdefault("presets", [])
+            cfg.setdefault("repo_notes", {})
             cfg.setdefault("theme", "light")
             cfg.setdefault("auto_refresh", True)
             cfg.setdefault("sound", True)
@@ -1580,6 +1582,117 @@ def scan_secrets(repo_path, max_commits=100, since_days=90):
 
 
 # ---------- Blame ----------
+_WIN_ABS_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-])[A-Za-z]:[\\/][^\s\"'<>|]+")
+
+
+def _upstream_ref(repo_path):
+    """返回 (上游引用, 分支名)；无上游时上游为 None。"""
+    out, rc = git(repo_path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}", timeout=15)
+    branch, _ = git(repo_path, "rev-parse", "--abbrev-ref", "HEAD", timeout=15)
+    branch = (branch or "").strip()
+    if rc == 0 and (out or "").strip():
+        return out.strip(), branch
+    if branch and branch != "HEAD":
+        out, rc = git(repo_path, "show-ref", "--verify", f"refs/remotes/origin/{branch}", timeout=15)
+        if rc == 0:
+            return f"origin/{branch}", branch
+    return None, branch
+
+
+def _scan_added_lines(diff_text):
+    """扫描 diff 新增行：密钥模式 + 私钥文件名 + 本机绝对路径。
+
+    返回 [{file, line, type, match}]；match 截断到 80 字，不在输出里全文回显密钥。
+    与 scan_secrets 的历史扫描互补：这里只看待推送的 diff，钩子与网页推送共用同一规则。
+    """
+    findings = []
+    file = ""
+    new_line = 0
+    for raw in (diff_text or "").splitlines():
+        if raw.startswith("diff --git "):
+            file = raw.split(" b/", 1)[1] if " b/" in raw else ""
+            if file and _PRIVATE_KEY_FILE_RE.search(file):
+                findings.append({"file": file, "line": 0, "type": "私钥文件", "match": file})
+            continue
+        m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", raw)
+        if m:
+            new_line = int(m.group(1))
+            continue
+        if not raw.startswith("+") or raw.startswith("+++"):
+            continue
+        content = raw[1:]
+        for type_name, pat in _SECRET_PATTERNS:
+            mm = pat.search(content)
+            if mm:
+                findings.append({"file": file, "line": new_line, "type": type_name,
+                                 "match": mm.group(0)[:80]})
+        mm = _WIN_ABS_PATH_RE.search(content)
+        if mm:
+            findings.append({"file": file, "line": new_line, "type": "本机绝对路径",
+                             "match": mm.group(0)[:80]})
+        new_line += 1
+    return findings
+
+
+def scan_outgoing(repo_path):
+    """扫描待推送内容（上游..HEAD 的新增行）。
+
+    返回 (upstream, branch, findings)：无上游时 upstream 为 None、findings 为空，
+    调用方按无上游流程处理（不静默放行也不误报）。
+    """
+    upstream, branch = _upstream_ref(repo_path)
+    if not upstream:
+        return None, branch, []
+    out, rc = git(repo_path, "diff", "-U0", "--no-color", "--no-renames",
+                  f"{upstream}..HEAD", timeout=120)
+    if rc != 0:
+        return upstream, branch, []
+    return upstream, branch, _scan_added_lines(out)
+
+
+def push_preview(repo_path):
+    """推送预览：分支、上游、超前提交数、文件增删统计、最近待推送提交。
+
+    无上游时返回 has_upstream=False（调用方决定是否直接推送）。
+    """
+    branch, _ = git(repo_path, "rev-parse", "--abbrev-ref", "HEAD", timeout=15)
+    branch = (branch or "").strip()
+    upstream, _b = _upstream_ref(repo_path)
+    if not upstream:
+        return {"branch": branch, "has_upstream": False, "upstream": None,
+                "ahead": 0, "files": [], "total_added": 0, "total_removed": 0,
+                "commits": []}
+    out, _ = git(repo_path, "rev-list", "--count", f"{upstream}..HEAD", timeout=60)
+    try:
+        ahead = int((out or "0").strip())
+    except ValueError:
+        ahead = 0
+    files = []
+    total_a = total_d = 0
+    out, _ = git(repo_path, "diff", "--numstat", "--no-renames",
+                 f"{upstream}..HEAD", timeout=120)
+    for line in (out or "").splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        try:
+            a = int(parts[0]) if parts[0] != "-" else 0
+            d = int(parts[1]) if parts[1] != "-" else 0
+        except ValueError:
+            a = d = 0
+        files.append({"path": _unquote_git_path(parts[2]), "added": a, "removed": d})
+        total_a += a
+        total_d += d
+    commits = []
+    out, _ = git(repo_path, "log", "-n", "10", "--format=%h %s",
+                 f"{upstream}..HEAD", timeout=60)
+    for line in (out or "").splitlines():
+        if line.strip():
+            commits.append(line.strip())
+    return {"branch": branch, "has_upstream": True, "upstream": upstream,
+            "ahead": ahead, "files": files, "total_added": total_a,
+            "total_removed": total_d, "commits": commits}
+
 def parse_blame(out):
     """解析 git blame 默认格式输出：每行 → {hash, author, date, line, content}。"""
     rows = []
